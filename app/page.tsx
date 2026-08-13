@@ -79,9 +79,11 @@ function NodePicker({
     if (sel.has(n)) onChange(selected.filter((x) => x !== n));
     else onChange([...selected, n]);
   };
+  const selectFiltered = () =>
+    onChange(Array.from(new Set([...selected, ...filtered])));
   return (
     <div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <input
           className={inputCls}
           placeholder="搜索节点…"
@@ -91,6 +93,22 @@ function NodePicker({
         <span className="shrink-0 text-xs text-zinc-500">
           已选 {selected.length} / {allNodes.length}
         </span>
+        <button
+          type="button"
+          className={`${btnGhost} shrink-0 !px-3 !py-1 text-xs`}
+          onClick={selectFiltered}
+          disabled={filtered.length === 0}
+        >
+          全选当前结果
+        </button>
+        <button
+          type="button"
+          className={`${btnGhost} shrink-0 !px-3 !py-1 text-xs`}
+          onClick={() => onChange([])}
+          disabled={selected.length === 0}
+        >
+          清空
+        </button>
       </div>
       <div className="mt-2 grid max-h-56 grid-cols-1 gap-1 overflow-y-auto rounded-lg border border-zinc-800 p-2 sm:grid-cols-2">
         {filtered.map((n) => (
@@ -318,6 +336,29 @@ export default function Home() {
       if (c.groups.some((g) => g.name === def.name)) return c;
       const id = `${def.id}-${Date.now()}`;
       return { ...c, groups: [...c.groups, { ...def, id }] };
+    });
+  const addManualGroup = () =>
+    setConfig((c) => {
+      const names = new Set(c.groups.map((group) => group.name));
+      const baseName = "新节点组";
+      let name = baseName;
+      let suffix = 2;
+      while (names.has(name)) {
+        name = `${baseName} ${suffix}`;
+        suffix += 1;
+      }
+      return {
+        ...c,
+        groups: [
+          ...c.groups,
+          {
+            id: `manual-${Date.now()}`,
+            name,
+            type: "manual",
+            nodes: [],
+          },
+        ],
+      };
     });
 
   /* --- 规则映射 --- */
@@ -629,9 +670,18 @@ export default function Home() {
                 </div>
               </div>
             )}
-            <h3 className="mb-2 text-sm font-medium text-zinc-200">
-              自定义筛选节点组（可选）
-            </h3>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <h3 className="mr-auto text-sm font-medium text-zinc-200">
+                自定义节点组（可选）
+              </h3>
+              <button
+                type="button"
+                className={btnPrimary}
+                onClick={addManualGroup}
+              >
+                + 新建节点组
+              </button>
+            </div>
             <div className="mb-3 flex flex-wrap gap-2">
               <span className="self-center text-sm text-zinc-500">快捷添加：</span>
               {GROUP_PRESETS.map((p) => (
@@ -694,9 +744,19 @@ export default function Home() {
                     {g.type === "manual" && (
                       <div className="mt-3 border-t border-zinc-800 pt-3">
                         {!preview ? (
-                          <p className="text-sm text-zinc-500">
-                            先点击下方「预览 / 提取规则」加载节点列表，再手动勾选要承接的节点。
-                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm text-zinc-500">
+                              先识别订阅节点，再勾选这个组包含的节点。
+                            </p>
+                            <button
+                              type="button"
+                              className={`${btnGhost} !px-3 !py-1 text-xs`}
+                              onClick={runPreview}
+                              disabled={loading}
+                            >
+                              {loading ? "识别中…" : "识别节点"}
+                            </button>
+                          </div>
                         ) : (
                           <NodePicker
                             allNodes={preview.allNodes}
@@ -722,6 +782,9 @@ export default function Home() {
             </h3>
             <p className="mt-1 text-sm text-zinc-500">
               使用项目内置的 iKuuu 规则集，包括动画疯、爱奇艺&哔哩哔哩、选择节点、国内网站等；这里只修改各类规则的目标。
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">
+              每条规则一次选择一个目标：可以是单个实际节点，也可以是导入订阅组或上面新建的自定义节点组。
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <button className={btnPrimary} onClick={runPreview} disabled={loading}>

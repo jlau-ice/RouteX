@@ -781,7 +781,7 @@ export default function Home() {
               A. iKuuu 基础规则
             </h3>
             <p className="mt-1 text-sm text-zinc-500">
-              使用项目内置的 iKuuu 规则集，包括动画疯、爱奇艺&哔哩哔哩、选择节点、国内网站等；这里只修改各类规则的目标。
+              使用项目内置的 iKuuu 规则集，包括动画疯、爱奇艺&哔哩哔哩、选择节点、国内网站等；这些名称会保留为 Clash 策略组，这里选择各组内部使用的节点目标。
             </p>
             <p className="mt-1 text-xs text-zinc-500">
               每条规则一次选择一个目标：可以是单个实际节点，也可以是导入订阅组或上面新建的自定义节点组。

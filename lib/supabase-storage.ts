@@ -58,3 +58,14 @@ export async function loadConfig(id: string): Promise<AppConfig | null> {
   assertAppConfig(config);
   return config;
 }
+
+/** 读取管理员统一维护的 iKuuu 基础规则。 */
+export async function loadBaseRules(): Promise<string[] | null> {
+  const value = await callRpc<unknown>("get_routex_base_rules", {});
+  if (!Array.isArray(value)) return null;
+
+  const rules = value.filter(
+    (rule): rule is string => typeof rule === "string" && rule.trim().length > 0,
+  );
+  return rules.length > 0 ? rules : null;
+}

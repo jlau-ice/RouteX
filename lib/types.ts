@@ -30,11 +30,11 @@ export interface SubscriptionSource {
   label?: string;
 }
 
-/** 原订阅规则类别 → 可执行目标的映射 */
+/** iKuuu 规则策略组 → 组内可执行目标的映射 */
 export interface RuleMappingEntry {
-  /** 基础订阅里的规则类别（原策略组名），如“动画疯” */
+  /** 基础规则里的原策略组名，如“动画疯” */
   category: string;
-  /** 单个节点名、用户节点组名、选择节点、DIRECT 或 REJECT */
+  /** 该策略组内部选择的单节点、用户节点组、选择节点、DIRECT 或 REJECT */
   group: string;
 }
 

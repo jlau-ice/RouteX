@@ -156,22 +156,23 @@ for (const r of out.rules) if (r.includes("国内网站")) { console.log("  ", r
 console.log("最后 2 条规则:");
 for (const r of out.rules.slice(-2)) console.log("  ", r);
 
-// 重写正确性校验
+// iKuuu 原策略组保留正确性校验
 const targetCounts = {};
 for (const r of out.rules) {
   const parts = r.split(",");
   const t = parts[parts.length - 1] === "no-resolve" ? parts[parts.length - 2] : parts[parts.length - 1];
   if (t) targetCounts[t] = (targetCounts[t] || 0) + 1;
 }
-console.log("\n===== 6) 重写正确性 =====");
+console.log("\n===== 6) iKuuu 策略组保留正确性 =====");
 console.log("规则目标分布:", targetCounts);
 console.log("chatgpt 自定义规则存在:", out.rules.some((r) => r.startsWith("DOMAIN-SUFFIX,chatgpt.com,")));
-console.log("动画疯→台湾节点 重写成功:", out.rules.some((r) => r.endsWith(",台湾节点")));
-console.log("国内网站→DIRECT 重写成功:", out.rules.some((r) => r.endsWith(",DIRECT")));
-console.log("拦截广告→REJECT 重写成功:", out.rules.some((r) => r.endsWith(",REJECT")));
+const policyGroups = new Map(out["proxy-groups"].map((g) => [g.name, g]));
+console.log("动画疯策略组→台湾节点:", policyGroups.get("📺 动画疯")?.proxies?.includes("台湾节点"));
+console.log("国内网站策略组→DIRECT:", policyGroups.get("🇨🇳 国内网站")?.proxies?.includes("DIRECT"));
+console.log("拦截广告策略组→REJECT:", policyGroups.get("🛑 拦截广告")?.proxies?.includes("REJECT"));
 console.log(
-  "iKuuu 规则→实际单节点 重写成功:",
-  Boolean(singleNodeMapping) && out.rules.some((r) => r.endsWith(`,${singleNodeMapping.group}`)),
+  "iKuuu 策略组→实际单节点:",
+  Boolean(singleNodeMapping) && policyGroups.get(singleNodeMapping.category)?.proxies?.includes(singleNodeMapping.group),
 );
 
 console.log("\n===== 7) 旧版链接兼容 =====");

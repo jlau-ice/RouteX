@@ -2,6 +2,7 @@ import yaml from "yaml";
 import type { AppConfig, CustomRule, NodeGroup, PreviewResult } from "./types";
 import baseRulesJson from "./base-rules.json";
 import { getErrorMessage } from "./errors";
+import { loadBaseRules } from "./supabase-storage";
 import {
   ALWAYS_AVAILABLE_TARGETS,
   AUTO_GROUP,
@@ -9,9 +10,37 @@ import {
 } from "./policy-targets";
 
 // 内置基础规则（来自 iKuuu，随项目一起打包，不依赖任何订阅）
-const BASE_RULES: string[] = (Array.isArray(baseRulesJson) ? baseRulesJson : [])
+const FALLBACK_BASE_RULES: string[] = (Array.isArray(baseRulesJson) ? baseRulesJson : [])
   .filter((r): r is string => typeof r === "string")
   .filter((r) => r.trim().length > 0);
+
+const BASE_RULES_CACHE_MS = 5 * 60 * 1000;
+let baseRulesCache: { expiresAt: number; rules: string[] } | null = null;
+
+/**
+ * 基础规则由 Supabase 单行表统一维护；数据库暂时不可用时回退到随项目
+ * 发布的副本，避免订阅生成服务因为外部存储故障完全不可用。
+ */
+async function getBaseRules(): Promise<string[]> {
+  if (baseRulesCache && baseRulesCache.expiresAt > Date.now()) {
+    return baseRulesCache.rules;
+  }
+
+  try {
+    const stored = await loadBaseRules();
+    if (stored) {
+      baseRulesCache = {
+        expiresAt: Date.now() + BASE_RULES_CACHE_MS,
+        rules: stored,
+      };
+      return stored;
+    }
+  } catch (error) {
+    console.error("Failed to load RouteX base rules from Supabase", error);
+  }
+
+  return FALLBACK_BASE_RULES;
+}
 
 // 规则里不会被当成“规则类别”的内建目标
 const BUILTIN_TARGETS = new Set(["DIRECT", "REJECT", "PASS", "REJECT-DROP", "GLOBAL"]);
@@ -173,6 +202,17 @@ export function remapRule(
   return parts.join(",");
 }
 
+/** iKuuu 基础规则中出现的策略组，保持原始顺序。 */
+function baseRuleCategories(rules: string[]): string[] {
+  return Array.from(
+    new Set(
+      rules
+        .map((rule) => ruleCategory(rule).category)
+        .filter((category): category is string => category !== null),
+    ),
+  );
+}
+
 /** 若规则的目标组不存在，回退到 fallback */
 export function fixRuleGroup(
   rule: string,
@@ -260,10 +300,16 @@ export async function generateConfig(config: AppConfig): Promise<string> {
     throw new Error("没有从订阅中解析到任何节点");
   }
 
-  const baseRules = BASE_RULES;
+  const baseRules = await getBaseRules();
 
-  // 节点组
-  const groups = buildGroups(config.groups, nodeNames);
+  // iKuuu 的规则类别同时也是最终需要展示在 Clash 里的策略组。
+  const categories = baseRuleCategories(baseRules);
+  const categoryNames = new Set(categories);
+
+  // 用户节点组不能覆盖 iKuuu 原策略组；同名时保留原策略组。
+  const groups = buildGroups(config.groups, nodeNames).filter(
+    (group) => !categoryNames.has(group.name),
+  );
   const groupNames = new Set(groups.map((g) => g.name));
   const builtinGroups = [
     {
@@ -283,17 +329,17 @@ export async function generateConfig(config: AppConfig): Promise<string> {
   const sourceGroups = buildSourceGroups(
     config,
     fetched,
-    [...groupNames, MAIN_GROUP, AUTO_GROUP],
+    [...groupNames, ...categoryNames, MAIN_GROUP, AUTO_GROUP],
   );
-  const allGroups = [...builtinGroups, ...sourceGroups, ...groups];
+  const selectableGroups = [...builtinGroups, ...sourceGroups, ...groups];
   const validTargets = new Set([
-    ...allGroups.map((g) => g.name),
+    ...selectableGroups.map((g) => g.name),
     ...nodeNames,
     ...ALWAYS_AVAILABLE_TARGETS,
   ]);
   const fallbackGroup = validTargets.has(MAIN_GROUP)
     ? MAIN_GROUP
-    : (allGroups[0]?.name ?? MAIN_GROUP);
+    : (selectableGroups[0]?.name ?? MAIN_GROUP);
 
   // iKuuu 原规则类别 → 规则目标。
   // 目标既可以是策略组，也可以是导入的单个节点或 Clash 内置的 DIRECT/REJECT。
@@ -302,19 +348,27 @@ export async function generateConfig(config: AppConfig): Promise<string> {
     if (validTargets.has(m.group)) mapping.set(m.category, m.group);
   }
 
+  // 保留 iKuuu 原策略组名称。网页中的映射只决定每个策略组内部
+  // 指向哪个单节点/节点组/DIRECT/REJECT，而不改写规则本身的目标名称。
+  const categoryGroups = categories.map((category) => ({
+    name: category,
+    type: "select",
+    proxies: [mapping.get(category) ?? fallbackGroup],
+  }));
+  const allGroups = [...categoryGroups, ...selectableGroups];
+
   // 自定义规则（最高优先级）
   const custom = config.customRules
     .flatMap(buildCustomRules)
     .filter(Boolean)
     .map((r) => fixRuleGroup(r, validTargets, fallbackGroup));
 
-  // 基础规则重写
-  const remapped = baseRules
-    .map((r) => remapRule(r, mapping, fallbackGroup))
-    .filter((r) => r.length > 0 && !r.startsWith("MATCH,"));
-
-  // 最终规则：自定义在前，基础规则在后，MATCH 兜底放最后
-  const finalRules = [...custom, ...remapped, `MATCH,${fallbackGroup}`];
+  // 最终规则：自定义在前，iKuuu 基础规则保持原样在后。
+  // 原规则中的 MATCH 继续指向“漏网之鱼”；仅在规则集缺少 MATCH 时补兜底。
+  const finalRules = [...custom, ...baseRules];
+  if (!baseRules.some((rule) => rule.startsWith("MATCH,"))) {
+    finalRules.push(`MATCH,${fallbackGroup}`);
+  }
 
   const output = {
     ...DEFAULT_SETTINGS,
@@ -328,6 +382,7 @@ export async function generateConfig(config: AppConfig): Promise<string> {
 
 /** 预览：返回所有节点、每个节点组的匹配结果、基础规则类别 */
 export async function previewConfig(config: AppConfig): Promise<PreviewResult> {
+  const baseRules = await getBaseRules();
   const fetched = await fetchAllSubscriptions(config);
   const nodeConfigs = fetched
     .map((f) => f.config)
@@ -372,20 +427,14 @@ export async function previewConfig(config: AppConfig): Promise<PreviewResult> {
     [...config.groups.map((g) => g.name), MAIN_GROUP, AUTO_GROUP],
   ).map((group) => ({ name: group.name, nodes: group.proxies }));
 
-  const categories = Array.from(
-    new Set(
-      BASE_RULES.map((r) => ruleCategory(r).category).filter(
-        (c): c is string => c !== null,
-      ),
-    ),
-  );
+  const categories = baseRuleCategories(baseRules);
 
   const subscriptions = fetched.map((f, i) => ({
     index: i,
     label: config.subscriptions[i]?.label || `订阅 ${i + 1}`,
     nodeCount: f.config ? collectNodes([f.config]).length : 0,
   }));
-  const baseRuleCount = BASE_RULES.length;
+  const baseRuleCount = baseRules.length;
 
   return {
     allNodes: nodeNames,

@@ -55,12 +55,39 @@ create policy "deny anon update" on public.configs for update using (false);
 create policy "deny anon delete" on public.configs for delete using (false);
 
 -- =============================================================
--- （可选）4) 内置基础规则入库：单行表，规则更新无需重新部署
+-- 4) iKuuu 基础规则：全站共用一份，只允许管理员直接维护。
+--    普通用户保存的是节点映射，不复制这 9816 条规则。
 -- =============================================================
--- create table if not exists public.base_rules (
---   id         int primary key default 1 check (id = 1),
---   rules      jsonb not null,
---   updated_at timestamptz not null default now()
--- );
--- insert into public.base_rules (id, rules) values (1, '[]')
---   on conflict (id) do nothing;
+create table if not exists public.routex_base_rules (
+  id         smallint primary key default 1 check (id = 1),
+  rules      jsonb not null check (jsonb_typeof(rules) = 'array'),
+  version    bigint not null default 1,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.routex_base_rules enable row level security;
+revoke all on table public.routex_base_rules from anon, authenticated;
+grant select on table public.routex_base_rules to anon, authenticated;
+grant all on table public.routex_base_rules to service_role;
+
+drop policy if exists "base rules are publicly readable" on public.routex_base_rules;
+create policy "base rules are publicly readable"
+  on public.routex_base_rules
+  for select
+  to anon, authenticated
+  using (id = 1);
+
+-- 应用只能读取规则，不能通过公开 API 修改规则。
+create or replace function public.get_routex_base_rules()
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select rules from public.routex_base_rules where id = 1;
+$$;
+
+revoke all on function public.get_routex_base_rules() from public;
+grant execute on function public.get_routex_base_rules()
+  to anon, authenticated, service_role;

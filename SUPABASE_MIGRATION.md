@@ -125,16 +125,17 @@ if (id && k) {
 4. 现有 base64「生成订阅链接」保留，作为离线/兼容兜底。
 5. localStorage 继续用作缓存，不删除。
 
-## 8. 可选阶段：基础规则入库
+## 8. 基础规则入库
 
-目标：改 `lib/base-rules.json` 不用重新部署。
+真实 iKuuu 规则存放在 `public.routex_base_rules` 的唯一一行中。普通用户的
+`routex_configs` 只保存订阅来源、节点组、规则目标映射和新增 Host/IP，避免
+每个配置重复保存 9816 条基础规则。
 
-1. `supabase/schema.sql` 里取消 `base_rules` 单行表的注释并执行。
-2. `lib/core.ts` 中 `BASE_RULES` 改为异步懒加载：
-   - 优先查 `base_rules` 表（`select rules from base_rules where id = 1`），带模块级内存缓存；
+1. 执行 `supabase/schema.sql` 中的 `routex_base_rules` 表与只读 RPC。
+2. `lib/core.ts` 异步加载规则：
+   - 优先通过 `get_routex_base_rules()` 读取数据库，带 5 分钟模块级缓存；
    - 表里为空/查询失败时回退到 `import baseRulesJson from "./base-rules.json"`（现有逻辑）。
-   - 注意：`BASE_RULES` 目前是模块级 `const`，`generateConfig`/`previewConfig` 直接引用。改为 `async function getBaseRules(): Promise<string[]>` 后，两个函数里 `const baseRules = await getBaseRules()`。
-3. 新增 `scripts/upload-base-rules.mjs`：用 service key 把 `lib/base-rules.json` upsert 进 `base_rules(id=1)`；本地运行，或做成 Vercel Cron。
+3. 规则更新由管理员在 Supabase SQL Editor 或受控管理工具中更新；应用没有公开写接口。
 
 ## 9. 测试
 

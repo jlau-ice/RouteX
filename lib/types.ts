@@ -1,7 +1,7 @@
 // 订阅聚合服务的配置类型
 
 /** 节点组类型 */
-export type GroupType = "auto" | "all" | "direct" | "reject";
+export type GroupType = "auto" | "manual" | "all" | "direct" | "reject";
 
 /** 一个承接规则用的节点组 */
 export interface NodeGroup {
@@ -11,6 +11,8 @@ export interface NodeGroup {
   type: GroupType;
   /** type=auto 时的正则，如 新加坡|🇸🇬|[-.]sg\d */
   pattern?: string;
+  /** type=manual 时手动勾选的节点名列表 */
+  nodes?: string[];
 }
 
 /** 自定义规则 */

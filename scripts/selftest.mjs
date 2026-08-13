@@ -48,6 +48,12 @@ const config = {
     { id: "all", name: "全部节点", type: "all" },
     { id: "direct", name: "直连", type: "direct" },
     { id: "reject", name: "拒绝", type: "reject" },
+    {
+      id: "manual-sg",
+      name: "新加坡精选（手动）",
+      type: "manual",
+      nodes: ["🇸🇬 新加坡Y01 | IEPL | x2", "qiwu-hupgrade-tx-sg4"],
+    },
   ],
   ruleMapping: [],
   customRules: [
@@ -108,6 +114,8 @@ const out = yaml.parse(text);
 console.log("\n===== 4) 校验输出 =====");
 console.log("proxies 节点数:", out.proxies.length);
 console.log("顶层设置: port =", out.port, "| mode =", out.mode, "| dns.enable =", out.dns?.enable, "| external-controller =", out["external-controller"]);
+const manualGroup = out["proxy-groups"].find((g) => g.name === "新加坡精选（手动）");
+console.log("手动节点组「新加坡精选」:", manualGroup ? `存在，含 ${manualGroup.proxies.length} 个节点 ${JSON.stringify(manualGroup.proxies)}` : "缺失 ✘");
 console.log("proxy-groups:", out["proxy-groups"].map((g) => g.name).join(" | "));
 console.log("rules 条数:", out.rules.length);
 

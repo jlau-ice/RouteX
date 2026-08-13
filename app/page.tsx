@@ -69,6 +69,59 @@ function Section({
   );
 }
 
+/* ---------- 手动选节点 ---------- */
+
+function NodePicker({
+  allNodes,
+  selected,
+  onChange,
+}: {
+  allNodes: string[];
+  selected: string[];
+  onChange: (nodes: string[]) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const sel = useMemo(() => new Set(selected), [selected]);
+  const filtered = allNodes.filter((n) =>
+    n.toLowerCase().includes(query.toLowerCase()),
+  );
+  const toggle = (n: string) => {
+    if (sel.has(n)) onChange(selected.filter((x) => x !== n));
+    else onChange([...selected, n]);
+  };
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <input
+          className={inputCls}
+          placeholder="搜索节点…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <span className="shrink-0 text-xs text-zinc-500">
+          已选 {selected.length} / {allNodes.length}
+        </span>
+      </div>
+      <div className="mt-2 grid max-h-56 grid-cols-1 gap-1 overflow-y-auto rounded-lg border border-zinc-800 p-2 sm:grid-cols-2">
+        {filtered.map((n) => (
+          <label
+            key={n}
+            className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-zinc-800"
+          >
+            <input
+              type="checkbox"
+              checked={sel.has(n)}
+              onChange={() => toggle(n)}
+              className="accent-sky-500"
+            />
+            <span className="truncate">{n}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ---------- 预设节点组 ---------- */
 
 const GROUP_PRESETS: { label: string; def: () => NodeGroup }[] = [
@@ -357,7 +410,7 @@ export default function Home() {
           {/* 节点组 */}
           <Section
             title="② 节点组"
-            desc="“自动”类型用正则从所有节点里挑出该组节点（不区分订阅）。生成后可在 Clash 里手动切换具体节点。"
+            desc="“自动”用正则挑节点；“手动”可逐个打勾选节点。生成后可在 Clash 里手动切换具体节点。"
           >
             <div className="mb-3 flex flex-wrap gap-2">
               <span className="self-center text-sm text-zinc-500">快捷添加：</span>
@@ -377,49 +430,64 @@ export default function Home() {
                   (x) => x.name === g.name,
                 )?.nodes;
                 return (
-                  <div
-                    key={g.id}
-                    className="flex flex-col gap-2 rounded-lg border border-zinc-800 p-3 sm:flex-row sm:items-center"
-                  >
-                    <input
-                      className={`${inputCls} sm:w-44`}
-                      value={g.name}
-                      onChange={(e) => updateGroup(i, { name: e.target.value })}
-                      placeholder="组名"
-                    />
-                    <select
-                      className={`${inputCls} sm:w-32`}
-                      value={g.type}
-                      onChange={(e) =>
-                        updateGroup(i, { type: e.target.value as GroupType })
-                      }
-                    >
-                      <option value="auto">自动识别</option>
-                      <option value="all">全部节点</option>
-                      <option value="direct">直连</option>
-                      <option value="reject">拒绝</option>
-                    </select>
-                    {g.type === "auto" && (
+                  <div key={g.id} className="rounded-lg border border-zinc-800 p-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                       <input
-                        className={`${inputCls} flex-1 font-mono`}
-                        value={g.pattern ?? ""}
-                        onChange={(e) =>
-                          updateGroup(i, { pattern: e.target.value })
-                        }
-                        placeholder="正则，如 新加坡|🇸🇬|[-.]sg\d"
+                        className={`${inputCls} sm:w-44`}
+                        value={g.name}
+                        onChange={(e) => updateGroup(i, { name: e.target.value })}
+                        placeholder="组名"
                       />
+                      <select
+                        className={`${inputCls} sm:w-32`}
+                        value={g.type}
+                        onChange={(e) =>
+                          updateGroup(i, { type: e.target.value as GroupType })
+                        }
+                      >
+                        <option value="auto">自动识别</option>
+                        <option value="manual">手动选择</option>
+                        <option value="all">全部节点</option>
+                        <option value="direct">直连</option>
+                        <option value="reject">拒绝</option>
+                      </select>
+                      {g.type === "auto" && (
+                        <input
+                          className={`${inputCls} flex-1 font-mono`}
+                          value={g.pattern ?? ""}
+                          onChange={(e) =>
+                            updateGroup(i, { pattern: e.target.value })
+                          }
+                          placeholder="正则，如 新加坡|🇸🇬|[-.]sg\d"
+                        />
+                      )}
+                      {matched !== undefined && (
+                        <span className="shrink-0 text-xs text-zinc-500">
+                          匹配 {matched.length} 个节点
+                        </span>
+                      )}
+                      <button
+                        className="shrink-0 text-zinc-500 transition-colors hover:text-red-400"
+                        onClick={() => removeGroup(i)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                    {g.type === "manual" && (
+                      <div className="mt-3 border-t border-zinc-800 pt-3">
+                        {!preview ? (
+                          <p className="text-sm text-zinc-500">
+                            先点击下方「预览 / 提取规则」加载节点列表，再手动勾选要承接的节点。
+                          </p>
+                        ) : (
+                          <NodePicker
+                            allNodes={preview.allNodes}
+                            selected={g.nodes ?? []}
+                            onChange={(nodes) => updateGroup(i, { nodes })}
+                          />
+                        )}
+                      </div>
                     )}
-                    {matched !== undefined && (
-                      <span className="shrink-0 text-xs text-zinc-500">
-                        匹配 {matched.length} 个节点
-                      </span>
-                    )}
-                    <button
-                      className="shrink-0 text-zinc-500 transition-colors hover:text-red-400"
-                      onClick={() => removeGroup(i)}
-                    >
-                      删除
-                    </button>
                   </div>
                 );
               })}

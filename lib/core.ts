@@ -80,6 +80,9 @@ export function buildGroups(
       } catch {
         proxies = [];
       }
+    } else if (def.type === "manual") {
+      const existing = new Set(nodeNames);
+      proxies = (def.nodes ?? []).filter((n) => existing.has(n));
     } else if (def.type === "all") {
       proxies = [...nodeNames];
     } else if (def.type === "direct") {
@@ -279,6 +282,9 @@ export async function previewConfig(config: AppConfig): Promise<PreviewResult> {
       } catch {
         matched = [];
       }
+    } else if (g.type === "manual") {
+      const existing = new Set(nodeNames);
+      matched = (g.nodes ?? []).filter((n) => existing.has(n));
     } else if (g.type === "all") {
       matched = [...nodeNames];
     } else if (g.type === "direct") {

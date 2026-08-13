@@ -12,24 +12,28 @@ import { buildDefaultConfig } from "@/lib/defaults";
 import { getErrorMessage } from "@/lib/errors";
 import {
   ALWAYS_AVAILABLE_TARGETS,
-  AUTO_GROUP,
   DIRECT_TARGET,
-  MAIN_GROUP,
+  LEGACY_POLICY_TARGETS,
   REJECT_TARGET,
 } from "@/lib/policy-targets";
 
 const LS_KEY = "clash-agg-config-v1";
+const LS_SAVED_KEY = "routex-saved-config-v1";
 
 /* ---------- 工具 ---------- */
 
-/** 给 iKuuu 原规则类别推荐默认目标；用户之后仍可改成任意单节点。 */
-function suggestGroupName(category: string, groups: NodeGroup[]): string {
+/** 给 iKuuu 原规则类别推荐默认目标。普通类别默认直接包含全部真实节点。 */
+function suggestTargets(
+  category: string,
+  groups: NodeGroup[],
+  nodeNames: string[],
+): string[] {
   const byName = (re: RegExp) => groups.find((g) => re.test(g.name))?.name;
-  if (/国内|直连/.test(category)) return DIRECT_TARGET;
-  if (/广告|拦截/.test(category)) return REJECT_TARGET;
+  if (/国内|直连/.test(category)) return [DIRECT_TARGET];
+  if (/广告|拦截/.test(category)) return [REJECT_TARGET];
   if (/动画疯|巴哈|台湾/.test(category))
-    return byName(/台湾/) ?? MAIN_GROUP;
-  return MAIN_GROUP;
+    return [byName(/台湾/) ?? nodeNames[0]].filter(Boolean);
+  return [...nodeNames];
 }
 
 /* ---------- 小组件 ---------- */
@@ -134,14 +138,14 @@ type TargetSection = { label: string; options: { value: string; label: string }[
 
 function MultiRuleTargetPicker({
   selected,
-  sourceGroupNames,
-  groupNames,
+  sourceGroups,
+  customGroups,
   nodeNames,
   onChange,
 }: {
   selected: string[];
-  sourceGroupNames: string[];
-  groupNames: string[];
+  sourceGroups: { name: string; nodes: string[] }[];
+  customGroups: { name: string; nodes: string[] }[];
   nodeNames: string[];
   onChange: (targets: string[]) => void;
 }) {
@@ -150,28 +154,32 @@ function MultiRuleTargetPicker({
   const sections = useMemo<TargetSection[]>(
     () => [
       {
-        label: "内置策略",
+        label: `真实节点（${nodeNames.length}）`,
+        options: nodeNames.map((value) => ({ value, label: value })),
+      },
+      {
+        label: "导入订阅组（选择后会展开为真实节点）",
+        options: sourceGroups.map(({ name, nodes }) => ({
+          value: name,
+          label: `${name}（${nodes.length} 个节点）`,
+        })),
+      },
+      {
+        label: "自定义节点组（选择后会展开为真实节点）",
+        options: customGroups.map(({ name, nodes }) => ({
+          value: name,
+          label: `${name}（${nodes.length} 个节点）`,
+        })),
+      },
+      {
+        label: "特殊目标（不是节点）",
         options: [
-          { value: MAIN_GROUP, label: "选择节点（Clash 中手动切换）" },
-          { value: AUTO_GROUP, label: "自动选择（测速）" },
           { value: DIRECT_TARGET, label: "直连（DIRECT）" },
           { value: REJECT_TARGET, label: "拒绝（REJECT）" },
         ],
       },
-      {
-        label: "导入的订阅节点组",
-        options: sourceGroupNames.map((value) => ({ value, label: value })),
-      },
-      {
-        label: "自定义节点组",
-        options: groupNames.map((value) => ({ value, label: value })),
-      },
-      {
-        label: `自动识别的单个节点（${nodeNames.length}）`,
-        options: nodeNames.map((value) => ({ value, label: value })),
-      },
     ],
-    [groupNames, nodeNames, sourceGroupNames],
+    [customGroups, nodeNames, sourceGroups],
   );
   const knownTargets = useMemo(
     () => new Set(sections.flatMap((section) => section.options.map((option) => option.value))),
@@ -227,8 +235,16 @@ function MultiRuleTargetPicker({
           </button>
         </div>
         <p className="mt-2 text-xs text-zinc-500">
-          已选 {selected.length} 项，可同时选择多个节点和节点组。
+          已选 {selected.length} 项。节点组只是筛选工具，生成时会展开成组内真实节点。
         </p>
+        <button
+          type="button"
+          className={`${btnGhost} mt-2 w-full !py-1 text-xs`}
+          onClick={() => onChange(nodeNames)}
+          disabled={nodeNames.length === 0}
+        >
+          选择全部 {nodeNames.length} 个真实节点
+        </button>
         <div className="mt-2 max-h-72 space-y-3 overflow-y-auto pr-1">
           {invalidTargets.length > 0 && (
             <div>
@@ -295,8 +311,6 @@ function RuleTargetOptions({
         <option value={currentValue}>⚠️ 已失效：{currentValue}</option>
       )}
       <optgroup label="内置策略">
-        <option value={MAIN_GROUP}>选择节点（Clash 中手动切换）</option>
-        <option value={AUTO_GROUP}>自动选择（测速）</option>
         <option value={DIRECT_TARGET}>直连（DIRECT）</option>
         <option value={REJECT_TARGET}>拒绝（REJECT）</option>
       </optgroup>
@@ -396,14 +410,13 @@ export default function Home() {
   const [cloudLoading, setCloudLoading] = useState(false);
   const loading = transitionLoading || cloudLoading;
   const [error, setError] = useState("");
-  const [subUrl, setSubUrl] = useState("");
   const [notice, setNotice] = useState("");
   const [saved, setSaved] = useState<{
     id: string;
-    k: string;
+    editKey: string;
     url: string;
-    loadUrl: string;
   } | null>(null);
+  const [savedConfig, setSavedConfig] = useState<AppConfig | null>(null);
   const [loadInput, setLoadInput] = useState("");
 
   // 从 localStorage 恢复
@@ -427,6 +440,20 @@ export default function Home() {
             setConfig({ ...parsed, groups });
           }
         }
+        const rawSaved = localStorage.getItem(LS_SAVED_KEY);
+        if (rawSaved) {
+          const parsedSaved = JSON.parse(rawSaved);
+          if (
+            typeof parsedSaved?.id === "string" &&
+            typeof parsedSaved?.editKey === "string" &&
+            typeof parsedSaved?.url === "string"
+          ) {
+            setSaved(parsedSaved);
+            if (parsedSaved.config?.version === 1) {
+              setSavedConfig(parsedSaved.config);
+            }
+          }
+        }
       } catch {}
     }, 0);
     return () => window.clearTimeout(timer);
@@ -439,6 +466,19 @@ export default function Home() {
       localStorage.setItem(LS_KEY, JSON.stringify(config));
     } catch {}
   }, [config]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (saved) {
+        localStorage.setItem(
+          LS_SAVED_KEY,
+          JSON.stringify({ ...saved, config: savedConfig }),
+        );
+      }
+      else localStorage.removeItem(LS_SAVED_KEY);
+    } catch {}
+  }, [saved, savedConfig]);
 
   /* --- 订阅 --- */
   const setSub = (i: number, k: "url" | "label", v: string) => {
@@ -534,7 +574,14 @@ export default function Home() {
       ...c,
       customRules: [
         ...c.customRules,
-        { type: "DOMAIN-SUFFIX", value: "", group: MAIN_GROUP },
+        {
+          type: "DOMAIN-SUFFIX",
+          value: "",
+          group:
+            c.groups.find((group) => group.type === "all")?.name ??
+            c.groups[0]?.name ??
+            DIRECT_TARGET,
+        },
       ],
     }));
 
@@ -560,11 +607,14 @@ export default function Home() {
           const existing = new Set(c.ruleMapping.map((m) => m.category));
           const toAdd = (data.categories as string[])
             .filter((cat) => !existing.has(cat))
-            .map((cat) => ({
-              category: cat,
-              group: suggestGroupName(cat, c.groups),
-              targets: [suggestGroupName(cat, c.groups)],
-            }))
+            .map((cat) => {
+              const targets = suggestTargets(
+                cat,
+                c.groups,
+                data.allNodes as string[],
+              );
+              return { category: cat, group: targets[0] ?? "", targets };
+            })
             .filter((m) => m.group);
           return {
             ...c,
@@ -589,41 +639,13 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subKey]);
 
-  /* --- 生成订阅链接 --- */
-  const generate = () => {
-    setError("");
-    setNotice("");
-    if (config.ruleMapping.length === 0) {
-      setNotice(
-        "基础规则尚未映射：所有基础规则将落到默认「🚀 选择节点」组。建议先点「预览/提取规则」为每个类别选承接组，再生成。",
-      );
-    }
-    startTransition(async () => {
-      try {
-        const response = await fetch("/api/config", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ config }),
-        });
-        const data = await response.json();
-        if (!response.ok || typeof data.id !== "string") {
-          setError(data.error ?? "配置保存失败");
-          return;
-        }
-        setSubUrl(`${window.location.origin}/api/sub?id=${data.id}`);
-      } catch (error: unknown) {
-        setError(`保存失败：${getErrorMessage(error)}`);
-      }
-    });
-  };
-
-  /* --- 保存到云端 --- */
+  /* --- 保存到云端：首次生成固定链接，以后原链接更新 --- */
   const saveConfig = async () => {
     setCloudLoading(true);
     setError("");
     setNotice("");
     try {
-      const res = await fetch("/api/save", {
+      const res = await fetch("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ config }),
@@ -633,7 +655,18 @@ export default function Home() {
         setError(data.error ?? "保存失败");
         return;
       }
-      setSaved(data);
+      if (typeof data.id !== "string" || typeof data.editKey !== "string") {
+        setError("保存服务返回的数据无效");
+        return;
+      }
+      const nextSaved = {
+        id: data.id,
+        editKey: data.editKey,
+        url: `/api/sub?id=${data.id}`,
+      };
+      setSaved(nextSaved);
+      setSavedConfig(config);
+      setNotice("订阅链接已生成。以后修改后点“更新已保存配置”，链接不会变化。");
     } catch (error: unknown) {
       setError(`保存失败：${getErrorMessage(error)}`);
     } finally {
@@ -647,16 +680,21 @@ export default function Home() {
     setError("");
     setNotice("");
     try {
-      const res = await fetch("/api/update", {
-        method: "POST",
+      const res = await fetch("/api/config", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: saved.id, k: saved.k, config }),
+        body: JSON.stringify({
+          id: saved.id,
+          editKey: saved.editKey,
+          config,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? "更新失败");
         return;
       }
+      setSavedConfig(config);
       setNotice("已更新云端保存的配置，刷新 Clash 订阅即可生效。");
     } catch (error: unknown) {
       setError(`更新失败：${getErrorMessage(error)}`);
@@ -665,27 +703,35 @@ export default function Home() {
     }
   };
 
-  /** 从链接 / 或 “id k” 解析出 id 与 secret */
-  const parseIdKey = (input: string) => {
-    const urlMatch = input.match(/[?&]id=([^&]+)&[^]*?k=([^&]+)/);
-    if (urlMatch) return { id: urlMatch[1], k: urlMatch[2] };
-    const bare = input.trim().split(/\s+/);
-    if (bare.length === 2) return { id: bare[0], k: bare[1] };
-    return null;
+  /** 从“UUID 编辑凭证”解析可编辑配置。 */
+  const parseConfigReference = (input: string) => {
+    const value = input.trim();
+    const [id, editKey = ""] = value.split(/\s+/, 2);
+    return /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(id)
+      ? { id, editKey }
+      : null;
   };
 
   const loadConfig = async () => {
     setCloudLoading(true);
     setError("");
     setNotice("");
-    const parsed = parseIdKey(loadInput);
-    if (!parsed) {
-      setError("无法解析：请粘贴 /api/sub?id=..&k=.. 链接，或输入 “id k”");
+    const reference = parseConfigReference(loadInput);
+    if (!reference) {
+      setError("无法解析：请粘贴备份的“UUID 编辑凭证”");
+      setCloudLoading(false);
+      return;
+    }
+    if (reference.editKey.length < 32) {
+      setError("加载并编辑配置需要“UUID 编辑凭证”；单独的订阅链接只能给 Clash 使用");
       setCloudLoading(false);
       return;
     }
     try {
-      const res = await fetch(`/api/load?id=${encodeURIComponent(parsed.id)}&k=${encodeURIComponent(parsed.k)}`);
+      const res = await fetch(
+        `/api/config?id=${encodeURIComponent(reference.id)}`,
+        { headers: { "X-RouteX-Edit-Key": reference.editKey } },
+      );
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? "加载失败");
@@ -694,11 +740,11 @@ export default function Home() {
       setConfig(data.config);
       setSaved({
         id: data.id,
-        k: parsed.k,
-        url: `${window.location.origin}/api/sub?id=${data.id}&k=${parsed.k}`,
-        loadUrl: `${window.location.origin}/api/load?id=${data.id}&k=${parsed.k}`,
+        editKey: reference.editKey,
+        url: `/api/sub?id=${data.id}`,
       });
-      setNotice(`已加载配置“${data.name ?? "未命名"}”。`);
+      setSavedConfig(data.config);
+      setNotice("已加载配置，可以继续更新原订阅链接。");
     } catch (error: unknown) {
       setError(`加载失败：${getErrorMessage(error)}`);
     } finally {
@@ -732,19 +778,30 @@ export default function Home() {
   const mappedTargets = (cat: string) => {
     const mapping = config.ruleMapping.find((item) => item.category === cat);
     if (!mapping) return [];
-    return mapping.targets?.length ? mapping.targets : mapping.group ? [mapping.group] : [];
+    const targets = mapping.targets?.length
+      ? mapping.targets
+      : mapping.group
+        ? [mapping.group]
+        : [];
+    return targets.some((target) =>
+      (LEGACY_POLICY_TARGETS as readonly string[]).includes(target),
+    )
+      ? nodeNames
+      : targets;
   };
   const applyRecommendedTargets = () => {
     if (!preview) return;
     setConfig((c) => ({
       ...c,
-      ruleMapping: preview.categories.map((category) => ({
-        category,
-        group: suggestGroupName(category, c.groups),
-        targets: [suggestGroupName(category, c.groups)],
-      })),
+      ruleMapping: preview.categories.map((category) => {
+        const targets = suggestTargets(category, c.groups, nodeNames);
+        return { category, group: targets[0] ?? "", targets };
+      }),
     }));
   };
+  const savedConfigIsCurrent =
+    savedConfig !== null &&
+    JSON.stringify(savedConfig) === JSON.stringify(config);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -1008,8 +1065,8 @@ export default function Home() {
                         </div>
                         <MultiRuleTargetPicker
                           selected={mappedTargets(cat)}
-                          sourceGroupNames={sourceGroupNames}
-                          groupNames={groupNames}
+                          sourceGroups={preview.sourceGroups}
+                          customGroups={preview.groups}
                           nodeNames={nodeNames}
                           onChange={(targets) => upsertMapping(cat, targets)}
                         />
@@ -1096,51 +1153,38 @@ export default function Home() {
           {/* 生成 */}
           <Section
             title="④ 生成订阅链接"
-            desc="节点选择、规则映射和批量新增规则会作为一份个人快照保存。内置 iKuuu 基础规则由项目统一维护。"
+            desc="首次保存生成固定链接；以后修改规则或节点后更新同一份配置，Clash 中的订阅链接不会变化。"
           >
-            <button className={btnPrimary} onClick={generate} disabled={loading}>
-              {loading ? "处理中…" : "保存并生成订阅链接"}
-            </button>
-
-            {subUrl && (
-              <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                <input
-                  readOnly
-                  className={`${inputCls} flex-1 font-mono text-xs`}
-                  value={subUrl}
-                  onFocus={(e) => e.currentTarget.select()}
-                />
-                <button
-                  className={btnGhost}
-                  onClick={() => navigator.clipboard.writeText(subUrl)}
-                >
-                  复制
-                </button>
-                <a className={btnGhost} href={subUrl} target="_blank" rel="noreferrer">
-                  查看 YAML
-                </a>
-              </div>
-            )}
-
-            <div className="mt-6 border-t border-zinc-800 pt-4">
-              <p className="text-sm text-zinc-400">
-                保存到 Supabase 生成短链；改完配置点「更新」即可。
-              </p>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <button
-                  className={btnPrimary}
-                  onClick={saveConfig}
-                  disabled={loading}
-                >
-                  💾 保存配置 / 生成短链
-                </button>
+            <div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                {saved ? (
+                  <button
+                    className={btnPrimary}
+                    onClick={updateSaved}
+                    disabled={loading || savedConfigIsCurrent}
+                  >
+                    {loading
+                      ? "更新中…"
+                      : savedConfigIsCurrent
+                        ? "已是最新配置（链接不变）"
+                        : "更新已保存配置（链接不变）"}
+                  </button>
+                ) : (
+                  <button
+                    className={btnPrimary}
+                    onClick={saveConfig}
+                    disabled={loading}
+                  >
+                    {loading ? "保存中…" : "保存并生成订阅链接"}
+                  </button>
+                )}
                 {saved && (
                   <button
                     className={btnGhost}
-                    onClick={updateSaved}
+                    onClick={saveConfig}
                     disabled={loading}
                   >
-                    更新已保存配置
+                    另存为新链接
                   </button>
                 )}
               </div>
@@ -1166,21 +1210,41 @@ export default function Home() {
                     </button>
                   </div>
                   <p className="text-xs text-zinc-500">
-                    把这个短链填进 Clash 订阅即可。链接里的 k
-                    是访问密钥，请勿公开分享。
+                    把这个固定链接填进 Clash。更新配置后只需在 Clash 刷新订阅。
                   </p>
+                  <details className="text-xs text-zinc-500">
+                    <summary className="cursor-pointer">备份配置编辑凭证</summary>
+                    <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                      <input
+                        readOnly
+                        className={`${inputCls} flex-1 font-mono text-xs`}
+                        value={`${saved.id} ${saved.editKey}`}
+                        onFocus={(event) => event.currentTarget.select()}
+                      />
+                      <button
+                        className={btnGhost}
+                        onClick={() =>
+                          navigator.clipboard.writeText(
+                            `${saved.id} ${saved.editKey}`,
+                          )
+                        }
+                      >
+                        复制编辑凭证
+                      </button>
+                    </div>
+                  </details>
                 </div>
               )}
 
               <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                 <input
                   className={`${inputCls} flex-1 font-mono text-xs`}
-                  placeholder="粘贴已保存的链接，或输入 “id k”"
+                  placeholder="粘贴“UUID 编辑凭证”"
                   value={loadInput}
                   onChange={(e) => setLoadInput(e.target.value)}
                 />
                 <button className={btnGhost} onClick={loadConfig} disabled={loading}>
-                  从链接加载
+                  从编辑凭证加载
                 </button>
               </div>
             </div>

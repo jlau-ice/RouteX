@@ -42,18 +42,53 @@ async function callRpc<T>(name: string, body: Record<string, unknown>): Promise<
   }
 }
 
-export async function saveConfig(config: AppConfig): Promise<string> {
+export async function saveConfig(
+  config: AppConfig,
+  editSecretHash: string,
+): Promise<string> {
   assertAppConfig(config);
-  const id = await callRpc<unknown>("save_routex_config", { p_config: config });
+  const id = await callRpc<unknown>("save_routex_config_v2", {
+    p_config: config,
+    p_edit_secret_hash: editSecretHash,
+  });
   if (typeof id !== "string" || !isConfigId(id)) {
     throw new Error("Supabase returned an invalid configuration ID");
   }
   return id;
 }
 
+export async function updateConfig(
+  id: string,
+  editSecretHash: string,
+  config: AppConfig,
+): Promise<boolean> {
+  if (!isConfigId(id)) return false;
+  assertAppConfig(config);
+  const updated = await callRpc<unknown>("update_routex_config", {
+    p_id: id,
+    p_edit_secret_hash: editSecretHash,
+    p_config: config,
+  });
+  return updated === true;
+}
+
 export async function loadConfig(id: string): Promise<AppConfig | null> {
   if (!isConfigId(id)) return null;
   const config = await callRpc<unknown>("get_routex_config", { p_id: id });
+  if (config === null) return null;
+  assertAppConfig(config);
+  return config;
+}
+
+export async function loadEditableConfig(
+  id: string,
+  editSecretHash: string,
+): Promise<AppConfig | null> {
+  if (!isConfigId(id)) return null;
+  const config = await callRpc<unknown>("get_routex_config_for_edit", {
+    p_id: id,
+    p_edit_secret_hash: editSecretHash,
+  });
   if (config === null) return null;
   assertAppConfig(config);
   return config;

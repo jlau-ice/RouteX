@@ -20,7 +20,7 @@ export interface CustomRule {
   type: "DOMAIN" | "DOMAIN-SUFFIX" | "DOMAIN-KEYWORD" | "IP-CIDR" | "RAW";
   /** RAW 时是完整规则行；其余为关键字/IP */
   value: string;
-  /** 目标：单个节点、用户节点组、内置选择组、DIRECT 或 REJECT */
+  /** 目标：单个节点、用户节点组、DIRECT 或 REJECT */
   group: string;
 }
 
@@ -34,7 +34,7 @@ export interface SubscriptionSource {
 export interface RuleMappingEntry {
   /** 基础规则里的原策略组名，如“动画疯” */
   category: string;
-  /** 该策略组内部选择的单节点、用户节点组、选择节点、DIRECT 或 REJECT */
+  /** 该策略组内部选择的单节点、用户节点组、DIRECT 或 REJECT */
   group: string;
   /** 多选目标；旧配置没有此字段时自动使用 group 作为唯一目标。 */
   targets?: string[];

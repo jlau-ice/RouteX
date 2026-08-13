@@ -5,8 +5,7 @@ import { getErrorMessage } from "./errors";
 import { loadBaseRules } from "./supabase-storage";
 import {
   ALWAYS_AVAILABLE_TARGETS,
-  AUTO_GROUP,
-  MAIN_GROUP,
+  LEGACY_POLICY_TARGETS,
 } from "./policy-targets";
 
 // 内置基础规则（来自 iKuuu，随项目一起打包，不依赖任何订阅）
@@ -282,8 +281,6 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
   },
 };
 
-const TEST_URL = "http://www.gstatic.com/generate_204";
-
 /** 生成最终的 Clash YAML 配置文本 */
 export async function generateConfig(config: AppConfig): Promise<string> {
   const fetched = await fetchAllSubscriptions(config);
@@ -311,42 +308,61 @@ export async function generateConfig(config: AppConfig): Promise<string> {
     (group) => !categoryNames.has(group.name),
   );
   const groupNames = new Set(groups.map((g) => g.name));
-  const builtinGroups = [
-    {
-      name: MAIN_GROUP,
-      type: "select",
-      proxies: [...nodeNames, "DIRECT"],
-    },
-    {
-      name: AUTO_GROUP,
-      type: "url-test",
-      url: TEST_URL,
-      interval: 300,
-      tolerance: 50,
-      proxies: [...nodeNames],
-    },
-  ].filter((g) => !groupNames.has(g.name));
   const sourceGroups = buildSourceGroups(
     config,
     fetched,
-    [...groupNames, ...categoryNames, MAIN_GROUP, AUTO_GROUP],
+    [...groupNames, ...categoryNames, ...ALWAYS_AVAILABLE_TARGETS],
   );
-  const selectableGroups = [...builtinGroups, ...sourceGroups, ...groups];
+  const selectableGroups = [...sourceGroups, ...groups];
   const validTargets = new Set([
     ...selectableGroups.map((g) => g.name),
     ...nodeNames,
     ...ALWAYS_AVAILABLE_TARGETS,
   ]);
-  const fallbackGroup = validTargets.has(MAIN_GROUP)
-    ? MAIN_GROUP
-    : (selectableGroups[0]?.name ?? MAIN_GROUP);
+  // 规则策略组里只放真实节点（或 DIRECT / REJECT），不嵌套“全部节点”
+  // 之类的节点组。这样 Clash 展开规则组时会直接看到实际节点。
+  const membersByGroup = new Map(
+    selectableGroups.map((group) => [group.name, group.proxies]),
+  );
+  const expandTarget = (target: string): string[] => {
+    if ((LEGACY_POLICY_TARGETS as readonly string[]).includes(target)) {
+      return nodeNames;
+    }
+    return membersByGroup.get(target) ?? [target];
+  };
+
+  // 自定义 Host/IP 规则仍需引用一个 Clash 策略组。仅为实际被
+  // 自定义规则引用的节点组输出辅助策略组，避免节点管理组全部污染 Clash。
+  const customRuleTargets = new Set(
+    config.customRules.flatMap((rule) =>
+      rule.type === "RAW"
+        ? buildCustomRules(rule)
+            .map((line) => ruleCategory(line).category)
+            .filter((target): target is string => Boolean(target))
+        : rule.group
+          ? [rule.group]
+          : [],
+    ),
+  );
+  const requiredHelperGroups = selectableGroups.filter((group) =>
+    customRuleTargets.has(group.name),
+  );
+  const outputGroupNames = new Set([
+    ...categoryNames,
+    ...requiredHelperGroups.map((group) => group.name),
+    ...nodeNames,
+    ...ALWAYS_AVAILABLE_TARGETS,
+  ]);
+  const fallbackGroup =
+    requiredHelperGroups[0]?.name ?? categories[0] ?? nodeNames[0];
 
   // iKuuu 原规则类别 → 规则目标。
   // 目标既可以是策略组，也可以是导入的单个节点或 Clash 内置的 DIRECT/REJECT。
   const mapping = new Map<string, string[]>();
   for (const m of config.ruleMapping) {
     const requested = m.targets?.length ? m.targets : [m.group];
-    const targets = Array.from(new Set(requested)).filter((target) =>
+    const expanded = requested.flatMap(expandTarget);
+    const targets = Array.from(new Set(expanded)).filter((target) =>
       validTargets.has(target),
     );
     if (targets.length > 0) mapping.set(m.category, targets);
@@ -357,15 +373,15 @@ export async function generateConfig(config: AppConfig): Promise<string> {
   const categoryGroups = categories.map((category) => ({
     name: category,
     type: "select",
-    proxies: mapping.get(category) ?? [fallbackGroup],
+    proxies: mapping.get(category) ?? [...nodeNames],
   }));
-  const allGroups = [...categoryGroups, ...selectableGroups];
+  const allGroups = [...categoryGroups, ...requiredHelperGroups];
 
   // 自定义规则（最高优先级）
   const custom = config.customRules
     .flatMap(buildCustomRules)
     .filter(Boolean)
-    .map((r) => fixRuleGroup(r, validTargets, fallbackGroup));
+    .map((r) => fixRuleGroup(r, outputGroupNames, fallbackGroup));
 
   // 最终规则：自定义在前，iKuuu 基础规则保持原样在后。
   // 原规则中的 MATCH 继续指向“漏网之鱼”；仅在规则集缺少 MATCH 时补兜底。
@@ -428,7 +444,7 @@ export async function previewConfig(config: AppConfig): Promise<PreviewResult> {
   const sourceGroups = buildSourceGroups(
     config,
     fetched,
-    [...config.groups.map((g) => g.name), MAIN_GROUP, AUTO_GROUP],
+    [...config.groups.map((g) => g.name), ...ALWAYS_AVAILABLE_TARGETS],
   ).map((group) => ({ name: group.name, nodes: group.proxies }));
 
   const categories = baseRuleCategories(baseRules);

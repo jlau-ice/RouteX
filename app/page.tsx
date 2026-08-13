@@ -195,6 +195,13 @@ export default function Home() {
   const [error, setError] = useState("");
   const [subUrl, setSubUrl] = useState("");
   const [notice, setNotice] = useState("");
+  const [saved, setSaved] = useState<{
+    id: string;
+    k: string;
+    url: string;
+    loadUrl: string;
+  } | null>(null);
+  const [loadInput, setLoadInput] = useState("");
 
   // 从 localStorage 恢复
   useEffect(() => {
@@ -346,6 +353,95 @@ export default function Home() {
       setSubUrl(`${window.location.origin}/api/sub?c=${encoded}`);
     } catch (e: any) {
       setError(`生成失败：${e?.message ?? e}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /* --- 保存到云端 --- */
+  const saveConfig = async () => {
+    setLoading(true);
+    setError("");
+    setNotice("");
+    try {
+      const res = await fetch("/api/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "保存失败");
+        return;
+      }
+      setSaved(data);
+    } catch (e: any) {
+      setError(`保存失败：${e?.message ?? e}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateSaved = async () => {
+    if (!saved) return;
+    setLoading(true);
+    setError("");
+    setNotice("");
+    try {
+      const res = await fetch("/api/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: saved.id, k: saved.k, config }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "更新失败");
+        return;
+      }
+      setNotice("已更新云端保存的配置，刷新 Clash 订阅即可生效。");
+    } catch (e: any) {
+      setError(`更新失败：${e?.message ?? e}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** 从链接 / 或 “id k” 解析出 id 与 secret */
+  const parseIdKey = (input: string) => {
+    const urlMatch = input.match(/[?&]id=([^&]+)&[^]*?k=([^&]+)/);
+    if (urlMatch) return { id: urlMatch[1], k: urlMatch[2] };
+    const bare = input.trim().split(/\s+/);
+    if (bare.length === 2) return { id: bare[0], k: bare[1] };
+    return null;
+  };
+
+  const loadConfig = async () => {
+    setLoading(true);
+    setError("");
+    setNotice("");
+    const parsed = parseIdKey(loadInput);
+    if (!parsed) {
+      setError("无法解析：请粘贴 /api/sub?id=..&k=.. 链接，或输入 “id k”");
+      setLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/load?id=${encodeURIComponent(parsed.id)}&k=${encodeURIComponent(parsed.k)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "加载失败");
+        return;
+      }
+      setConfig(data.config);
+      setSaved({
+        id: data.id,
+        k: parsed.k,
+        url: `${window.location.origin}/api/sub?id=${data.id}&k=${parsed.k}`,
+        loadUrl: `${window.location.origin}/api/load?id=${data.id}&k=${parsed.k}`,
+      });
+      setNotice(`已加载配置“${data.name ?? "未命名"}”。`);
+    } catch (e: any) {
+      setError(`加载失败：${e?.message ?? e}`);
     } finally {
       setLoading(false);
     }
@@ -637,7 +733,7 @@ export default function Home() {
           {/* 生成 */}
           <Section
             title="⑤ 生成订阅链接"
-            desc="生成的地址填进 Clash Verge Rev → 订阅。之后基础订阅更新节点时，Clash 刷新该地址即可拿到最新合并结果。"
+            desc="两种方式：base64 链接（离线可用）或保存到 Supabase 生成短链。基础订阅更新节点时，Clash 刷新该地址即可拿到最新合并结果。"
           >
             <button className={btnPrimary} onClick={generate} disabled={loading}>
               生成订阅链接
@@ -663,6 +759,69 @@ export default function Home() {
               </div>
             )}
 
+            <div className="mt-6 border-t border-zinc-800 pt-4">
+              <p className="text-sm text-zinc-400">
+                保存到 Supabase 生成短链；改完配置点「更新」即可。
+              </p>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <button
+                  className={btnPrimary}
+                  onClick={saveConfig}
+                  disabled={loading}
+                >
+                  💾 保存配置 / 生成短链
+                </button>
+                {saved && (
+                  <button
+                    className={btnGhost}
+                    onClick={updateSaved}
+                    disabled={loading}
+                  >
+                    更新已保存配置
+                  </button>
+                )}
+              </div>
+
+              {saved && (
+                <div className="mt-3 space-y-2">
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      readOnly
+                      className={`${inputCls} flex-1 font-mono text-xs`}
+                      value={`${window.location.origin}${saved.url}`}
+                      onFocus={(e) => e.currentTarget.select()}
+                    />
+                    <button
+                      className={btnGhost}
+                      onClick={() =>
+                        navigator.clipboard.writeText(
+                          `${window.location.origin}${saved.url}`,
+                        )
+                      }
+                    >
+                      复制短链
+                    </button>
+                  </div>
+                  <p className="text-xs text-zinc-500">
+                    把这个短链填进 Clash 订阅即可。链接里的 k
+                    是访问密钥，请勿公开分享。
+                  </p>
+                </div>
+              )}
+
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <input
+                  className={`${inputCls} flex-1 font-mono text-xs`}
+                  placeholder="粘贴已保存的链接，或输入 “id k”"
+                  value={loadInput}
+                  onChange={(e) => setLoadInput(e.target.value)}
+                />
+                <button className={btnGhost} onClick={loadConfig} disabled={loading}>
+                  从链接加载
+                </button>
+              </div>
+            </div>
+
             {notice && (
               <p className="mt-4 rounded-lg border border-amber-900 bg-amber-950/40 p-3 text-sm text-amber-300">
                 {notice}
@@ -684,7 +843,7 @@ export default function Home() {
         </div>
 
         <footer className="mt-10 text-center text-xs text-zinc-600">
-          配置保存在浏览器本地并编码进订阅链接；订阅拉取由 /api/sub 在服务端完成。
+          配置可保存到 Supabase（短链）或编码进链接（离线）；订阅拉取由 /api/sub 在服务端完成。
         </footer>
       </div>
     </div>

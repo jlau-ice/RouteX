@@ -40,16 +40,21 @@ export interface RuleMappingEntry {
 
 export interface AppConfig {
   version: number;
-  /** 节点来源（可多个，全部合并去重） */
+  /** 节点来源（可多个，全部合并去重；仅提供节点，规则走内置基础规则） */
   subscriptions: SubscriptionSource[];
-  /** 基础规则取自第几个订阅（下标） */
-  baseIndex: number;
   /** 节点组定义 */
   groups: NodeGroup[];
   /** 基础规则类别映射 */
   ruleMapping: RuleMappingEntry[];
   /** 自定义规则（最高优先级） */
   customRules: CustomRule[];
+}
+
+/** 每个订阅的统计 */
+export interface SubInfo {
+  index: number;
+  label: string;
+  nodeCount: number;
 }
 
 /** /api/preview 的返回结果 */
@@ -61,4 +66,8 @@ export interface PreviewResult {
   categories: string[];
   /** 提示信息（如订阅拉取失败的订阅索引） */
   warnings: string[];
+  /** 各订阅的节点/规则数统计 */
+  subscriptions: SubInfo[];
+  /** 当前基础订阅的规则条数 */
+  baseRuleCount: number;
 }

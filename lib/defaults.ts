@@ -35,7 +35,6 @@ export function buildDefaultConfig(): AppConfig {
   return {
     version: 1,
     subscriptions: DEFAULT_SUBSCRIPTIONS.map((s) => ({ ...s })),
-    baseIndex: 0,
     groups: [
       { id: "sg", name: "数据库-新加坡", type: "auto", pattern: "新加坡|🇸🇬|[-.]sg\\d" },
       { id: "us", name: "ChatGPT-美国", type: "auto", pattern: "美国|🇺🇸|🇺🇲|[-.]sv[-.\\d]|[-.]us\\d" },

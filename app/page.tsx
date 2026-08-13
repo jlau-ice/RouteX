@@ -194,6 +194,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [subUrl, setSubUrl] = useState("");
+  const [notice, setNotice] = useState("");
 
   // 从 localStorage 恢复
   useEffect(() => {
@@ -214,8 +215,6 @@ export default function Home() {
     } catch {}
   }, [config]);
 
-  const patch = (p: Partial<AppConfig>) => setConfig((c) => ({ ...c, ...p }));
-
   /* --- 订阅 --- */
   const setSub = (i: number, k: "url" | "label", v: string) => {
     setConfig((c) => {
@@ -231,14 +230,10 @@ export default function Home() {
       subscriptions: [...c.subscriptions, { url: "", label: "" }],
     }));
   const removeSub = (i: number) =>
-    setConfig((c) => {
-      const subscriptions = c.subscriptions.filter((_, idx) => idx !== i);
-      return {
-        ...c,
-        subscriptions,
-        baseIndex: Math.min(c.baseIndex, Math.max(0, subscriptions.length - 1)),
-      };
-    });
+    setConfig((c) => ({
+      ...c,
+      subscriptions: c.subscriptions.filter((_, idx) => idx !== i),
+    }));
 
   /* --- 节点组 --- */
   const updateGroup = (i: number, p: Partial<NodeGroup>) =>
@@ -295,6 +290,7 @@ export default function Home() {
   const runPreview = async () => {
     setLoading(true);
     setError("");
+    setNotice("");
     try {
       const res = await fetch("/api/preview", {
         method: "POST",
@@ -327,10 +323,24 @@ export default function Home() {
     }
   };
 
+  // 打开页面后自动提取一次规则类别（订阅地址非空且还没预览过时）
+  const subKey = config.subscriptions.map((s) => s.url).join("|");
+  useEffect(() => {
+    if (!subKey || preview || loading) return;
+    runPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subKey]);
+
   /* --- 生成订阅链接 --- */
   const generate = async () => {
     setLoading(true);
     setError("");
+    setNotice("");
+    if (config.ruleMapping.length === 0) {
+      setNotice(
+        "基础规则尚未映射：所有基础规则将落到默认「🚀 选择节点」组。建议先点「预览/提取规则」为每个类别选承接组，再生成。",
+      );
+    }
     try {
       const encoded = await encodeConfig(config);
       setSubUrl(`${window.location.origin}/api/sub?c=${encoded}`);
@@ -362,7 +372,7 @@ export default function Home() {
           {/* 订阅设置 */}
           <Section
             title="① 订阅来源"
-            desc="全部订阅的节点都会合并去重；勾选“基础规则”的订阅，其规则会被提取并映射。"
+            desc="所有订阅的节点会合并去重。规则使用内置的 iKuuu 基础规则集，不依赖任何订阅。"
           >
             <div className="space-y-3">
               {config.subscriptions.map((s, i) => (
@@ -370,16 +380,6 @@ export default function Home() {
                   key={i}
                   className="flex flex-col gap-2 rounded-lg border border-zinc-800 p-3 sm:flex-row sm:items-center"
                 >
-                  <label className="flex shrink-0 items-center gap-2 text-sm text-zinc-300">
-                    <input
-                      type="radio"
-                      name="baseIndex"
-                      checked={config.baseIndex === i}
-                      onChange={() => patch({ baseIndex: i })}
-                      className="accent-sky-500"
-                    />
-                    基础规则
-                  </label>
                   <input
                     className={inputCls}
                     placeholder="订阅 URL（带 token）"
@@ -496,8 +496,8 @@ export default function Home() {
 
           {/* 基础规则映射 */}
           <Section
-            title="③ 基础规则 → 节点组"
-            desc="先点下方“预览/提取规则”，从基础订阅里自动识别规则类别，再为每个类别选择承接的节点组。"
+            title="③ 内置基础规则 → 节点组"
+            desc="基础规则来自内置的 iKuuu 规则集（自动提取类别）。为每个类别选择承接的节点组；未选中的类别会落到默认组。"
           >
             <button className={btnPrimary} onClick={runPreview} disabled={loading}>
               {loading
@@ -509,18 +509,28 @@ export default function Home() {
 
             {preview && (
               <>
-                <div className="mt-4 grid grid-cols-2 gap-2 text-sm text-zinc-400 sm:grid-cols-4">
-                  <div className="rounded-lg bg-zinc-800/60 p-3">
-                    <div className="text-lg font-semibold text-zinc-100">
-                      {preview.allNodes.length}
-                    </div>
-                    <div>总节点数</div>
+                <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-800/40 p-3 text-sm">
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    <span>
+                      节点{" "}
+                      <b className="text-zinc-100">{preview.allNodes.length}</b>
+                    </span>
+                    <span>
+                      内置基础规则{" "}
+                      <b className="text-zinc-100">{preview.baseRuleCount}</b> 条
+                    </span>
+                    <span>
+                      规则类别{" "}
+                      <b className="text-zinc-100">{preview.categories.length}</b>
+                    </span>
                   </div>
-                  <div className="rounded-lg bg-zinc-800/60 p-3">
-                    <div className="text-lg font-semibold text-zinc-100">
-                      {preview.categories.length}
-                    </div>
-                    <div>规则类别</div>
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500">
+                    {preview.subscriptions.map((s) => (
+                      <span key={s.index}>
+                        订阅 {s.index + 1}
+                        {s.label ? `（${s.label}）` : ""}：{s.nodeCount} 节点
+                      </span>
+                    ))}
                   </div>
                 </div>
 
@@ -553,7 +563,7 @@ export default function Home() {
                   </div>
                 ) : (
                   <p className="mt-4 text-sm text-zinc-500">
-                    基础订阅里没有提取到规则类别（检查基础订阅是否选择了正确的来源）。
+                    内置基础规则里没有提取到规则类别（可能规则集格式有变化）。
                   </p>
                 )}
               </>
@@ -653,6 +663,11 @@ export default function Home() {
               </div>
             )}
 
+            {notice && (
+              <p className="mt-4 rounded-lg border border-amber-900 bg-amber-950/40 p-3 text-sm text-amber-300">
+                {notice}
+              </p>
+            )}
             {error && (
               <p className="mt-4 rounded-lg border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
                 {error}

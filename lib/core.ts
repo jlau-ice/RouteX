@@ -1,15 +1,11 @@
 import yaml from "yaml";
 import type { AppConfig, CustomRule, NodeGroup, PreviewResult } from "./types";
+import baseRulesJson from "./base-rules.json";
 
-// 拉取订阅时会用到的集合类键，不会带进输出配置
-const COLLECTION_KEYS = new Set([
-  "proxies",
-  "proxy-groups",
-  "rules",
-  "rule-providers",
-  "proxy-providers",
-  "sub-rules",
-]);
+// 内置基础规则（来自 iKuuu，随项目一起打包，不依赖任何订阅）
+const BASE_RULES: string[] = (Array.isArray(baseRulesJson) ? baseRulesJson : [])
+  .filter((r): r is string => typeof r === "string")
+  .filter((r) => r.trim().length > 0);
 
 // 规则里不会被当成“规则类别”的内建目标
 const BUILTIN_TARGETS = new Set(["DIRECT", "REJECT", "PASS", "REJECT-DROP", "GLOBAL"]);
@@ -164,19 +160,24 @@ export function buildCustomRule(r: CustomRule): string {
   }
 }
 
-/** 从基础订阅里拷贝顶层设置（端口/DNS 等），跳过集合类键 */
-function pickSettings(baseCfg: any): Record<string, any> {
-  const out: Record<string, any> = { mode: "rule" };
-  if (baseCfg && typeof baseCfg === "object") {
-    for (const [k, v] of Object.entries(baseCfg)) {
-      if (COLLECTION_KEYS.has(k)) continue;
-      if (k === "mode") continue;
-      out[k] = v;
-    }
-    if (typeof baseCfg.mode === "string") out.mode = baseCfg.mode;
-  }
-  return out;
-}
+/** 输出配置的固定顶层设置（端口/DNS 等） */
+const DEFAULT_SETTINGS: Record<string, any> = {
+  port: 7890,
+  "socks-port": 7891,
+  "allow-lan": false,
+  mode: "rule",
+  "log-level": "info",
+  ipv6: false,
+  "external-controller": "127.0.0.1:9090",
+  dns: {
+    enable: true,
+    ipv6: false,
+    "enhanced-mode": "fake-ip",
+    "fake-ip-range": "198.18.0.1/16",
+    nameserver: ["223.5.5.5", "119.29.29.29"],
+    fallback: ["8.8.8.8", "1.1.1.1"],
+  },
+};
 
 const MAIN_GROUP = "🚀 选择节点";
 const AUTO_GROUP = "♻️ 自动选择";
@@ -196,11 +197,7 @@ export async function generateConfig(config: AppConfig): Promise<string> {
     throw new Error("没有从订阅中解析到任何节点");
   }
 
-  const baseCfg = fetched[config.baseIndex]?.config;
-  const rawRules: unknown = baseCfg?.rules;
-  const baseRules: string[] = Array.isArray(rawRules)
-    ? rawRules.filter((r): r is string => typeof r === "string")
-    : [];
+  const baseRules = BASE_RULES;
 
   // 节点组
   const groups = buildGroups(config.groups, nodeNames);
@@ -247,7 +244,7 @@ export async function generateConfig(config: AppConfig): Promise<string> {
   const finalRules = [...custom, ...remapped, `MATCH,${fallbackGroup}`];
 
   const output = {
-    ...pickSettings(baseCfg),
+    ...DEFAULT_SETTINGS,
     proxies: nodes,
     "proxy-groups": allGroups,
     rules: finalRules,
@@ -295,18 +292,27 @@ export async function previewConfig(config: AppConfig): Promise<PreviewResult> {
     return { name: g.name, nodes: matched };
   });
 
-  const baseCfg = fetched[config.baseIndex]?.config;
-  const rawRules: unknown = baseCfg?.rules;
-  const baseRules: string[] = Array.isArray(rawRules)
-    ? rawRules.filter((r): r is string => typeof r === "string")
-    : [];
   const categories = Array.from(
     new Set(
-      baseRules
-        .map((r) => ruleCategory(r).category)
-        .filter((c): c is string => c !== null),
+      BASE_RULES.map((r) => ruleCategory(r).category).filter(
+        (c): c is string => c !== null,
+      ),
     ),
   );
 
-  return { allNodes: nodeNames, groups, categories, warnings };
+  const subscriptions = fetched.map((f, i) => ({
+    index: i,
+    label: config.subscriptions[i]?.label || `订阅 ${i + 1}`,
+    nodeCount: f.config ? collectNodes([f.config]).length : 0,
+  }));
+  const baseRuleCount = BASE_RULES.length;
+
+  return {
+    allNodes: nodeNames,
+    groups,
+    categories,
+    warnings,
+    subscriptions,
+    baseRuleCount,
+  };
 }

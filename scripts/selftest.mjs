@@ -35,10 +35,9 @@ const chatgptDomains = [
 const config = {
   version: 1,
   subscriptions: [
-    { url: profileUrls[0], label: "订阅1（基础规则）" },
+    { url: profileUrls[0], label: "订阅1" },
     { url: profileUrls[1], label: "订阅2" },
   ],
-  baseIndex: 0,
   groups: [
     { id: "sg", name: "数据库-新加坡", type: "auto", pattern: "新加坡|🇸🇬|[-.]sg\\d" },
     { id: "us", name: "ChatGPT-美国", type: "auto", pattern: "美国|🇺🇸|🇺🇲|[-.]sv[-.\\d]|[-.]us\\d" },

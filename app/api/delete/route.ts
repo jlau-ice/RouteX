@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { supabase, hasSupabase } from "@/lib/supabase";
+import { isRecord } from "@/lib/config-validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,15 +11,18 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "未配置 Supabase" }, { status: 501 });
   }
 
-  let body: any;
+  let body: unknown;
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "请求体解析失败" }, { status: 400 });
   }
 
-  const { id, k } = body ?? {};
-  if (!id || !k) {
+  if (!isRecord(body)) {
+    return Response.json({ error: "请求体格式无效" }, { status: 400 });
+  }
+  const { id, k } = body;
+  if (typeof id !== "string" || typeof k !== "string") {
     return Response.json({ error: "缺少 id / k" }, { status: 400 });
   }
 

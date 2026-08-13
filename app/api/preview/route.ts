@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { previewConfig } from "@/lib/core";
+import { validateAppConfig } from "@/lib/config-validation";
 import type { AppConfig } from "@/lib/types";
+import { getErrorMessage } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,12 +18,17 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "请求体解析失败" }, { status: 400 });
   }
 
+  const validationError = validateAppConfig(config);
+  if (validationError) {
+    return Response.json({ error: validationError }, { status: 400 });
+  }
+
   try {
     const result = await previewConfig(config);
     return Response.json(result);
-  } catch (e: any) {
+  } catch (error: unknown) {
     return Response.json(
-      { error: `预览失败：${e?.message ?? e}` },
+      { error: `预览失败：${getErrorMessage(error)}` },
       { status: 500 },
     );
   }

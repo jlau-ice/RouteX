@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import type {
   AppConfig,
   CustomRule,
@@ -9,37 +9,27 @@ import type {
   PreviewResult,
 } from "@/lib/types";
 import { buildDefaultConfig } from "@/lib/defaults";
+import { getErrorMessage } from "@/lib/errors";
+import {
+  ALWAYS_AVAILABLE_TARGETS,
+  AUTO_GROUP,
+  DIRECT_TARGET,
+  MAIN_GROUP,
+  REJECT_TARGET,
+} from "@/lib/policy-targets";
 
 const LS_KEY = "clash-agg-config-v1";
 
 /* ---------- 工具 ---------- */
 
-/** 把配置编码成可放进 URL 的 base64url（deflate 压缩） */
-async function encodeConfig(config: AppConfig): Promise<string> {
-  const json = JSON.stringify(config);
-  const stream = new Blob([json])
-    .stream()
-    .pipeThrough(new CompressionStream("deflate"));
-  const buf = await new Response(stream).arrayBuffer();
-  const bytes = new Uint8Array(buf);
-  let bin = "";
-  bytes.forEach((b) => (bin += String.fromCharCode(b)));
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-/** 给某个基础规则类别推荐一个默认承接组 */
+/** 给 iKuuu 原规则类别推荐默认目标；用户之后仍可改成任意单节点。 */
 function suggestGroupName(category: string, groups: NodeGroup[]): string {
-  const byType = (t: GroupType) => groups.find((g) => g.type === t)?.name;
   const byName = (re: RegExp) => groups.find((g) => re.test(g.name))?.name;
-  if (/国内|直连/.test(category))
-    return byType("direct") ?? byName(/直连/) ?? groups[0]?.name ?? "";
-  if (/广告|拦截/.test(category))
-    return byType("reject") ?? byType("direct") ?? byName(/拒绝/) ?? "";
+  if (/国内|直连/.test(category)) return DIRECT_TARGET;
+  if (/广告|拦截/.test(category)) return REJECT_TARGET;
   if (/动画疯|巴哈|台湾/.test(category))
-    return byName(/台湾/) ?? byType("all") ?? groups[0]?.name ?? "";
-  if (/选择节点|漏网|全局/.test(category))
-    return byType("all") ?? groups[0]?.name ?? "";
-  return byType("all") ?? groups[0]?.name ?? "";
+    return byName(/台湾/) ?? MAIN_GROUP;
+  return MAIN_GROUP;
 }
 
 /* ---------- 小组件 ---------- */
@@ -122,6 +112,66 @@ function NodePicker({
   );
 }
 
+function RuleTargetOptions({
+  currentValue,
+  sourceGroupNames,
+  groupNames,
+  nodeNames,
+}: {
+  currentValue: string;
+  sourceGroupNames: string[];
+  groupNames: string[];
+  nodeNames: string[];
+}) {
+  const knownTargets = new Set([
+    ...ALWAYS_AVAILABLE_TARGETS,
+    ...sourceGroupNames,
+    ...groupNames,
+    ...nodeNames,
+  ]);
+
+  return (
+    <>
+      {currentValue && !knownTargets.has(currentValue) && (
+        <option value={currentValue}>⚠️ 已失效：{currentValue}</option>
+      )}
+      <optgroup label="内置策略">
+        <option value={MAIN_GROUP}>选择节点（Clash 中手动切换）</option>
+        <option value={AUTO_GROUP}>自动选择（测速）</option>
+        <option value={DIRECT_TARGET}>直连（DIRECT）</option>
+        <option value={REJECT_TARGET}>拒绝（REJECT）</option>
+      </optgroup>
+      {sourceGroupNames.length > 0 && (
+        <optgroup label="导入的订阅节点组">
+          {sourceGroupNames.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </optgroup>
+      )}
+      {groupNames.length > 0 && (
+        <optgroup label="自定义筛选节点组">
+          {groupNames.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </optgroup>
+      )}
+      {nodeNames.length > 0 && (
+        <optgroup label={`自动识别的单个节点（${nodeNames.length}）`}>
+          {nodeNames.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </>
+  );
+}
+
 /* ---------- 预设节点组 ---------- */
 
 const GROUP_PRESETS: { label: string; def: () => NodeGroup }[] = [
@@ -174,14 +224,6 @@ const GROUP_PRESETS: { label: string; def: () => NodeGroup }[] = [
     label: "全部节点",
     def: () => ({ id: "all", name: "全部节点", type: "all" }),
   },
-  {
-    label: "直连",
-    def: () => ({ id: "direct", name: "直连", type: "direct" }),
-  },
-  {
-    label: "拒绝",
-    def: () => ({ id: "reject", name: "拒绝", type: "reject" }),
-  },
 ];
 
 const RULE_TYPES = ["DOMAIN-SUFFIX", "DOMAIN", "DOMAIN-KEYWORD", "IP-CIDR", "RAW"];
@@ -191,7 +233,9 @@ const RULE_TYPES = ["DOMAIN-SUFFIX", "DOMAIN", "DOMAIN-KEYWORD", "IP-CIDR", "RAW
 export default function Home() {
   const [config, setConfig] = useState<AppConfig>(buildDefaultConfig);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [transitionLoading, startTransition] = useTransition();
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const loading = transitionLoading || cloudLoading;
   const [error, setError] = useState("");
   const [subUrl, setSubUrl] = useState("");
   const [notice, setNotice] = useState("");
@@ -205,13 +249,28 @@ export default function Home() {
 
   // 从 localStorage 恢复
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed?.version === 1) setConfig(parsed);
-      }
-    } catch {}
+    const timer = window.setTimeout(() => {
+      try {
+        const raw = localStorage.getItem(LS_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.version === 1) {
+            // v1 曾把 DIRECT / REJECT 误建成“节点组”；它们现在是规则的内置目标。
+            const groups = Array.isArray(parsed.groups)
+              ? parsed.groups.filter(
+                  (group: NodeGroup) =>
+                    !(
+                      (group.id === "direct" && group.name === "直连") ||
+                      (group.id === "reject" && group.name === "拒绝")
+                    ),
+                )
+              : [];
+            setConfig({ ...parsed, groups });
+          }
+        }
+      } catch {}
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   // 持久化
@@ -289,58 +348,62 @@ export default function Home() {
       ...c,
       customRules: [
         ...c.customRules,
-        { type: "DOMAIN-SUFFIX", value: "", group: c.groups[0]?.name ?? "" },
+        { type: "DOMAIN-SUFFIX", value: "", group: MAIN_GROUP },
       ],
     }));
 
   /* --- 预览 --- */
-  const runPreview = async () => {
-    setLoading(true);
+  const runPreview = () => {
     setError("");
     setNotice("");
-    try {
-      const res = await fetch("/api/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ config }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? "预览失败");
-        return;
+    startTransition(async () => {
+      try {
+        const res = await fetch("/api/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ config }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error ?? "预览失败");
+          return;
+        }
+        setPreview(data as PreviewResult);
+        // 把新类别补进映射（用默认推荐值）
+        setConfig((c) => {
+          const existing = new Set(c.ruleMapping.map((m) => m.category));
+          const toAdd = (data.categories as string[])
+            .filter((cat) => !existing.has(cat))
+            .map((cat) => ({
+              category: cat,
+              group: suggestGroupName(cat, c.groups),
+            }))
+            .filter((m) => m.group);
+          return {
+            ...c,
+            ruleMapping:
+              toAdd.length > 0
+                ? [...c.ruleMapping, ...toAdd]
+                : c.ruleMapping,
+          };
+        });
+      } catch (error: unknown) {
+        setError(`预览失败：${getErrorMessage(error)}`);
       }
-      setPreview(data as PreviewResult);
-      // 把新类别补进映射（用默认推荐值）
-      setConfig((c) => {
-        const existing = new Set(c.ruleMapping.map((m) => m.category));
-        const toAdd = (data.categories as string[])
-          .filter((cat) => !existing.has(cat))
-          .map((cat) => ({
-            category: cat,
-            group: suggestGroupName(cat, c.groups),
-          }))
-          .filter((m) => m.group);
-        if (toAdd.length === 0) return c;
-        return { ...c, ruleMapping: [...c.ruleMapping, ...toAdd] };
-      });
-    } catch (e: any) {
-      setError(`预览失败：${e?.message ?? e}`);
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   // 打开页面后自动提取一次规则类别（订阅地址非空且还没预览过时）
   const subKey = config.subscriptions.map((s) => s.url).join("|");
   useEffect(() => {
     if (!subKey || preview || loading) return;
-    runPreview();
+    const timer = window.setTimeout(runPreview, 0);
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subKey]);
 
   /* --- 生成订阅链接 --- */
-  const generate = async () => {
-    setLoading(true);
+  const generate = () => {
     setError("");
     setNotice("");
     if (config.ruleMapping.length === 0) {
@@ -348,19 +411,28 @@ export default function Home() {
         "基础规则尚未映射：所有基础规则将落到默认「🚀 选择节点」组。建议先点「预览/提取规则」为每个类别选承接组，再生成。",
       );
     }
-    try {
-      const encoded = await encodeConfig(config);
-      setSubUrl(`${window.location.origin}/api/sub?c=${encoded}`);
-    } catch (e: any) {
-      setError(`生成失败：${e?.message ?? e}`);
-    } finally {
-      setLoading(false);
-    }
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ config }),
+        });
+        const data = await response.json();
+        if (!response.ok || typeof data.id !== "string") {
+          setError(data.error ?? "配置保存失败");
+          return;
+        }
+        setSubUrl(`${window.location.origin}/api/sub?id=${data.id}`);
+      } catch (error: unknown) {
+        setError(`保存失败：${getErrorMessage(error)}`);
+      }
+    });
   };
 
   /* --- 保存到云端 --- */
   const saveConfig = async () => {
-    setLoading(true);
+    setCloudLoading(true);
     setError("");
     setNotice("");
     try {
@@ -375,16 +447,16 @@ export default function Home() {
         return;
       }
       setSaved(data);
-    } catch (e: any) {
-      setError(`保存失败：${e?.message ?? e}`);
+    } catch (error: unknown) {
+      setError(`保存失败：${getErrorMessage(error)}`);
     } finally {
-      setLoading(false);
+      setCloudLoading(false);
     }
   };
 
   const updateSaved = async () => {
     if (!saved) return;
-    setLoading(true);
+    setCloudLoading(true);
     setError("");
     setNotice("");
     try {
@@ -399,10 +471,10 @@ export default function Home() {
         return;
       }
       setNotice("已更新云端保存的配置，刷新 Clash 订阅即可生效。");
-    } catch (e: any) {
-      setError(`更新失败：${e?.message ?? e}`);
+    } catch (error: unknown) {
+      setError(`更新失败：${getErrorMessage(error)}`);
     } finally {
-      setLoading(false);
+      setCloudLoading(false);
     }
   };
 
@@ -416,13 +488,13 @@ export default function Home() {
   };
 
   const loadConfig = async () => {
-    setLoading(true);
+    setCloudLoading(true);
     setError("");
     setNotice("");
     const parsed = parseIdKey(loadInput);
     if (!parsed) {
       setError("无法解析：请粘贴 /api/sub?id=..&k=.. 链接，或输入 “id k”");
-      setLoading(false);
+      setCloudLoading(false);
       return;
     }
     try {
@@ -440,19 +512,48 @@ export default function Home() {
         loadUrl: `${window.location.origin}/api/load?id=${data.id}&k=${parsed.k}`,
       });
       setNotice(`已加载配置“${data.name ?? "未命名"}”。`);
-    } catch (e: any) {
-      setError(`加载失败：${e?.message ?? e}`);
+    } catch (error: unknown) {
+      setError(`加载失败：${getErrorMessage(error)}`);
     } finally {
-      setLoading(false);
+      setCloudLoading(false);
     }
   };
 
   const groupNames = useMemo(
-    () => config.groups.map((g) => g.name),
+    () => {
+      const reserved = new Set<string>(ALWAYS_AVAILABLE_TARGETS);
+      return Array.from(
+        new Set(config.groups.map((g) => g.name.trim()).filter(Boolean)),
+      ).filter((name) => !reserved.has(name));
+    },
     [config.groups],
   );
+  const sourceGroupNames = useMemo(
+    () => (preview?.sourceGroups ?? []).map((group) => group.name),
+    [preview?.sourceGroups],
+  );
+  const nodeNames = useMemo(() => {
+    const reserved = new Set<string>([
+      ...ALWAYS_AVAILABLE_TARGETS,
+      ...sourceGroupNames,
+      ...groupNames,
+    ]);
+    return Array.from(new Set(preview?.allNodes ?? [])).filter(
+      (name) => !reserved.has(name),
+    );
+  }, [groupNames, preview?.allNodes, sourceGroupNames]);
   const mappedGroup = (cat: string) =>
     config.ruleMapping.find((m) => m.category === cat)?.group ?? "";
+  const applyRecommendedTargets = () => {
+    if (!preview) return;
+    setConfig((c) => ({
+      ...c,
+      ruleMapping: preview.categories.map((category) => ({
+        category,
+        group: suggestGroupName(category, c.groups),
+      })),
+    }));
+  };
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -460,7 +561,7 @@ export default function Home() {
         <header className="mb-8">
           <h1 className="text-2xl font-bold">RouteX · 订阅聚合 · 规则可视化配置</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            多个订阅合并成一个；基础规则按类别承接节点组；配置编码进订阅链接，无需数据库。
+            保留 iKuuu 原始规则，自动识别所有导入节点；每类规则可指定单个节点、节点组、直连或拒绝。
           </p>
         </header>
 
@@ -505,9 +606,32 @@ export default function Home() {
 
           {/* 节点组 */}
           <Section
-            title="② 节点组"
-            desc="“自动”用正则挑节点；“手动”可逐个打勾选节点。生成后可在 Clash 里手动切换具体节点。"
+            title="② 节点管理"
+            desc="每个导入订阅会自动成为一个节点组。下面也可以按名称筛选或手动勾选节点，供后面的规则选择。"
           >
+            {preview && preview.sourceGroups.length > 0 && (
+              <div className="mb-5">
+                <h3 className="text-sm font-medium text-zinc-200">
+                  导入的订阅节点组
+                </h3>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {preview.sourceGroups.map((group) => (
+                    <div
+                      key={group.name}
+                      className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm"
+                    >
+                      <span className="truncate text-zinc-300">{group.name}</span>
+                      <span className="shrink-0 text-xs text-zinc-500">
+                        {group.nodes.length} 个节点
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <h3 className="mb-2 text-sm font-medium text-zinc-200">
+              自定义筛选节点组（可选）
+            </h3>
             <div className="mb-3 flex flex-wrap gap-2">
               <span className="self-center text-sm text-zinc-500">快捷添加：</span>
               {GROUP_PRESETS.map((p) => (
@@ -541,11 +665,9 @@ export default function Home() {
                           updateGroup(i, { type: e.target.value as GroupType })
                         }
                       >
-                        <option value="auto">自动识别</option>
+                        <option value="auto">按名称筛选</option>
                         <option value="manual">手动选择</option>
                         <option value="all">全部节点</option>
-                        <option value="direct">直连</option>
-                        <option value="reject">拒绝</option>
                       </select>
                       {g.type === "auto" && (
                         <input
@@ -590,18 +712,31 @@ export default function Home() {
             </div>
           </Section>
 
-          {/* 基础规则映射 */}
+          {/* 规则管理 */}
           <Section
-            title="③ 内置基础规则 → 节点组"
-            desc="基础规则来自内置的 iKuuu 规则集（自动提取类别）。为每个类别选择承接的节点组；未选中的类别会落到默认组。"
+            title="③ 规则管理"
+            desc="基础规则和新加规则统一在这里管理；每一类规则都在右侧选择要走的节点、节点组、直连或拒绝。"
           >
-            <button className={btnPrimary} onClick={runPreview} disabled={loading}>
-              {loading
-                ? "处理中…"
-                : preview
-                  ? "重新预览 / 提取规则"
-                  : "预览 / 提取规则"}
-            </button>
+            <h3 className="text-sm font-semibold text-zinc-100">
+              A. iKuuu 基础规则
+            </h3>
+            <p className="mt-1 text-sm text-zinc-500">
+              使用项目内置的 iKuuu 规则集，包括动画疯、爱奇艺&哔哩哔哩、选择节点、国内网站等；这里只修改各类规则的目标。
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button className={btnPrimary} onClick={runPreview} disabled={loading}>
+                {loading
+                  ? "识别中…"
+                  : preview
+                    ? "重新识别节点 / 读取规则"
+                    : "自动识别节点 / 读取规则"}
+              </button>
+              {preview && (
+                <button className={btnGhost} onClick={applyRecommendedTargets}>
+                  应用推荐默认值
+                </button>
+              )}
+            </div>
 
             {preview && (
               <>
@@ -630,6 +765,24 @@ export default function Home() {
                   </div>
                 </div>
 
+                {preview.allNodes.length > 0 && (
+                  <details className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+                    <summary className="cursor-pointer text-sm text-zinc-300">
+                      查看识别到的 {preview.allNodes.length} 个节点
+                    </summary>
+                    <div className="mt-3 flex max-h-48 flex-wrap gap-2 overflow-y-auto">
+                      {preview.allNodes.map((name) => (
+                        <span
+                          key={name}
+                          className="rounded-md bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
+                        >
+                          {name}
+                        </span>
+                      ))}
+                    </div>
+                  </details>
+                )}
+
                 {preview.categories.length > 0 ? (
                   <div className="mt-4 space-y-2">
                     {preview.categories.map((cat) => (
@@ -641,18 +794,19 @@ export default function Home() {
                           {cat}
                         </div>
                         <select
-                          className={`${inputCls} sm:w-52`}
+                          className={`${inputCls} sm:w-80`}
                           value={mappedGroup(cat)}
                           onChange={(e) => upsertMapping(cat, e.target.value)}
                         >
                           <option value="" disabled>
-                            选择承接节点组
+                            选择节点 / 节点组 / 直连
                           </option>
-                          {groupNames.map((n) => (
-                            <option key={n} value={n}>
-                              {n}
-                            </option>
-                          ))}
+                          <RuleTargetOptions
+                            currentValue={mappedGroup(cat)}
+                            sourceGroupNames={sourceGroupNames}
+                            groupNames={groupNames}
+                            nodeNames={nodeNames}
+                          />
                         </select>
                       </div>
                     ))}
@@ -664,14 +818,15 @@ export default function Home() {
                 )}
               </>
             )}
-          </Section>
 
-          {/* 自定义规则 */}
-          <Section
-            title="④ 自定义规则（最高优先级）"
-            desc="新增的规则会排在所有规则最前面。IP-CIDR 会自动补 /32 并加 no-resolve。"
-          >
-            <div className="space-y-2">
+            <div className="mt-8 border-t border-zinc-800 pt-6">
+              <h3 className="text-sm font-semibold text-zinc-100">
+                B. 新加 Host / IP 规则（最高优先级）
+              </h3>
+              <p className="mt-1 text-sm text-zinc-500">
+                可以一次粘贴多个 Host、域名或 IP；每行一个，整批共用右侧选择的节点目标。IP-CIDR 会自动补 /32 和 no-resolve。
+              </p>
+              <div className="mt-4 space-y-2">
               {config.customRules.map((r, i) => (
                 <div
                   key={i}
@@ -692,29 +847,31 @@ export default function Home() {
                       </option>
                     ))}
                   </select>
-                  <input
+                  <textarea
+                    rows={2}
                     className={`${inputCls} flex-1 font-mono`}
                     value={r.value}
                     placeholder={
                       r.type === "RAW"
-                        ? "完整规则行，如 DOMAIN-KEYWORD,openai,组名"
-                        : "域名 / IP"
+                        ? "完整规则行，每行一条"
+                        : "可批量粘贴域名 / IP，每行一个（也支持空格或逗号）"
                     }
                     onChange={(e) => updateCustom(i, { value: e.target.value })}
                   />
                   <select
-                    className={`${inputCls} sm:w-44`}
+                    className={`${inputCls} sm:w-72`}
                     value={r.group}
                     onChange={(e) => updateCustom(i, { group: e.target.value })}
                   >
                     <option value="" disabled>
-                      选择节点组
+                      选择节点 / 节点组 / 直连
                     </option>
-                    {groupNames.map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
+                    <RuleTargetOptions
+                      currentValue={r.group}
+                      sourceGroupNames={sourceGroupNames}
+                      groupNames={groupNames}
+                      nodeNames={nodeNames}
+                    />
                   </select>
                   <button
                     className="shrink-0 text-zinc-500 transition-colors hover:text-red-400"
@@ -725,18 +882,19 @@ export default function Home() {
                 </div>
               ))}
               <button className={btnGhost} onClick={addCustom}>
-                + 添加规则
+                + 添加一批规则
               </button>
+              </div>
             </div>
           </Section>
 
           {/* 生成 */}
           <Section
-            title="⑤ 生成订阅链接"
-            desc="两种方式：base64 链接（离线可用）或保存到 Supabase 生成短链。基础订阅更新节点时，Clash 刷新该地址即可拿到最新合并结果。"
+            title="④ 生成订阅链接"
+            desc="节点选择、规则映射和批量新增规则会作为一份个人快照保存。内置 iKuuu 基础规则由项目统一维护。"
           >
             <button className={btnPrimary} onClick={generate} disabled={loading}>
-              生成订阅链接
+              {loading ? "处理中…" : "保存并生成订阅链接"}
             </button>
 
             {subUrl && (
@@ -843,7 +1001,7 @@ export default function Home() {
         </div>
 
         <footer className="mt-10 text-center text-xs text-zinc-600">
-          配置可保存到 Supabase（短链）或编码进链接（离线）；订阅拉取由 /api/sub 在服务端完成。
+          编辑草稿保存在浏览器本地；配置可保存到 Supabase，订阅拉取由 /api/sub 在服务端完成。
         </footer>
       </div>
     </div>

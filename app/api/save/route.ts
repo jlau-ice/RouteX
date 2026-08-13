@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { randomBytes } from "crypto";
 import { supabase, hasSupabase } from "@/lib/supabase";
 import type { AppConfig } from "@/lib/types";
+import { isRecord, validateAppConfig } from "@/lib/config-validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,19 +16,26 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: any;
+  let body: unknown;
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "请求体解析失败" }, { status: 400 });
   }
 
-  const config = body?.config as AppConfig | undefined;
-  if (!config || typeof config !== "object") {
+  if (!isRecord(body)) {
+    return Response.json({ error: "请求体格式无效" }, { status: 400 });
+  }
+  const config = body.config;
+  const validationError = validateAppConfig(config);
+  if (validationError) {
+    return Response.json({ error: validationError }, { status: 400 });
+  }
+  if (!config) {
     return Response.json({ error: "缺少 config" }, { status: 400 });
   }
   const name =
-    typeof body?.name === "string" && body.name.trim()
+    typeof body.name === "string" && body.name.trim()
       ? body.name.trim()
       : null;
 
@@ -39,7 +47,7 @@ export async function POST(req: NextRequest) {
     const slug = randomBytes(6).toString("base64url");
     const { data, error } = await supabase!
       .from("configs")
-      .insert({ slug, name, config, secret })
+      .insert({ slug, name, config: config as AppConfig, secret })
       .select("id, slug")
       .single();
 

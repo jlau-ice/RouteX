@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { supabase, hasSupabase } from "@/lib/supabase";
+import { isRecord, validateAppConfig } from "@/lib/config-validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,19 +11,26 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "未配置 Supabase" }, { status: 501 });
   }
 
-  let body: any;
+  let body: unknown;
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "请求体解析失败" }, { status: 400 });
   }
 
-  const { id, k, config, name } = body ?? {};
-  if (!id || !k || !config || typeof config !== "object") {
+  if (!isRecord(body)) {
+    return Response.json({ error: "请求体格式无效" }, { status: 400 });
+  }
+  const { id, k, config, name } = body;
+  if (typeof id !== "string" || typeof k !== "string") {
     return Response.json({ error: "缺少 id / k / config" }, { status: 400 });
   }
+  const validationError = validateAppConfig(config);
+  if (validationError) {
+    return Response.json({ error: validationError }, { status: 400 });
+  }
 
-  const patch: Record<string, any> = { config };
+  const patch: Record<string, unknown> = { config };
   if (typeof name === "string") patch.name = name.trim() || null;
 
   const { data, error } = await supabase!

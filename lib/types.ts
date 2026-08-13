@@ -3,7 +3,7 @@
 /** 节点组类型 */
 export type GroupType = "auto" | "manual" | "all" | "direct" | "reject";
 
-/** 一个承接规则用的节点组 */
+/** 用户自己建立的节点集合；不是 iKuuu 的规则类别 */
 export interface NodeGroup {
   id: string;
   /** 策略组名，如“数据库-新加坡” */
@@ -20,7 +20,7 @@ export interface CustomRule {
   type: "DOMAIN" | "DOMAIN-SUFFIX" | "DOMAIN-KEYWORD" | "IP-CIDR" | "RAW";
   /** RAW 时是完整规则行；其余为关键字/IP */
   value: string;
-  /** 目标策略组名 */
+  /** 目标：单个节点、用户节点组、内置选择组、DIRECT 或 REJECT */
   group: string;
 }
 
@@ -30,11 +30,11 @@ export interface SubscriptionSource {
   label?: string;
 }
 
-/** 基础规则类别 → 节点组 的映射 */
+/** 原订阅规则类别 → 可执行目标的映射 */
 export interface RuleMappingEntry {
   /** 基础订阅里的规则类别（原策略组名），如“动画疯” */
   category: string;
-  /** 承接它的节点组名，如“台湾节点” */
+  /** 单个节点名、用户节点组名、选择节点、DIRECT 或 REJECT */
   group: string;
 }
 
@@ -60,6 +60,8 @@ export interface SubInfo {
 /** /api/preview 的返回结果 */
 export interface PreviewResult {
   allNodes: string[];
+  /** 每个导入订阅自动形成的节点组 */
+  sourceGroups: { name: string; nodes: string[] }[];
   /** 每个节点组匹配到的节点 */
   groups: { name: string; nodes: string[] }[];
   /** 从基础订阅提取的规则类别 */

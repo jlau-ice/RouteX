@@ -1,6 +1,12 @@
 import yaml from "yaml";
 import type { AppConfig, CustomRule, NodeGroup, PreviewResult } from "./types";
 import baseRulesJson from "./base-rules.json";
+import { getErrorMessage } from "./errors";
+import {
+  ALWAYS_AVAILABLE_TARGETS,
+  AUTO_GROUP,
+  MAIN_GROUP,
+} from "./policy-targets";
 
 // 内置基础规则（来自 iKuuu，随项目一起打包，不依赖任何订阅）
 const BASE_RULES: string[] = (Array.isArray(baseRulesJson) ? baseRulesJson : [])
@@ -10,7 +16,19 @@ const BASE_RULES: string[] = (Array.isArray(baseRulesJson) ? baseRulesJson : [])
 // 规则里不会被当成“规则类别”的内建目标
 const BUILTIN_TARGETS = new Set(["DIRECT", "REJECT", "PASS", "REJECT-DROP", "GLOBAL"]);
 
-async function fetchSubscription(url: string): Promise<any> {
+type ClashConfig = Record<string, unknown>;
+type ClashProxy = Record<string, unknown> & { name: string };
+type FetchedSubscription = {
+  config: ClashConfig | null;
+  error: string | null;
+  index: number;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function fetchSubscription(url: string): Promise<ClashConfig> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12000);
   try {
@@ -22,38 +40,40 @@ async function fetchSubscription(url: string): Promise<any> {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
-    const parsed = yaml.parse(text);
-    if (!parsed || typeof parsed !== "object") throw new Error("内容不是 YAML");
+    const parsed: unknown = yaml.parse(text);
+    if (!isRecord(parsed)) throw new Error("内容不是 YAML");
     return parsed;
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function fetchAllSubscriptions(config: AppConfig) {
+async function fetchAllSubscriptions(
+  config: AppConfig,
+): Promise<FetchedSubscription[]> {
   return Promise.all(
     config.subscriptions.map(async (s, index) => {
       try {
         const c = await fetchSubscription(s.url);
-        return { config: c as any, error: null as string | null, index };
-      } catch (e: any) {
-        return { config: null as any, error: String(e?.message ?? e), index };
+        return { config: c, error: null, index };
+      } catch (error: unknown) {
+        return { config: null, error: getErrorMessage(error), index };
       }
     }),
   );
 }
 
 /** 合并所有订阅的节点，按名字去重 */
-export function collectNodes(configs: any[]): any[] {
+export function collectNodes(configs: ClashConfig[]): ClashProxy[] {
   const seen = new Set<string>();
-  const nodes: any[] = [];
+  const nodes: ClashProxy[] = [];
   for (const cfg of configs) {
-    if (!cfg || !Array.isArray(cfg.proxies)) continue;
-    for (const p of cfg.proxies) {
-      if (p && typeof p === "object" && typeof p.name === "string" && p.name) {
-        if (!seen.has(p.name)) {
-          seen.add(p.name);
-          nodes.push(p);
+    if (!Array.isArray(cfg.proxies)) continue;
+    for (const proxy of cfg.proxies as unknown[]) {
+      if (isRecord(proxy) && typeof proxy.name === "string" && proxy.name) {
+        if (!seen.has(proxy.name)) {
+          seen.add(proxy.name);
+          nodes.push(proxy as ClashProxy);
         }
       }
     }
@@ -89,6 +109,35 @@ export function buildGroups(
     if (proxies.length > 0) out.push({ name: def.name, type: "select", proxies });
   }
   return out;
+}
+
+/** 每个导入订阅自动形成一个可选节点组。 */
+function buildSourceGroups(
+  config: AppConfig,
+  fetched: Pick<FetchedSubscription, "config" | "index">[],
+  reservedNames: Iterable<string>,
+): { name: string; type: string; proxies: string[] }[] {
+  const used = new Set(reservedNames);
+  const groups: { name: string; type: string; proxies: string[] }[] = [];
+
+  for (const item of fetched) {
+    if (!item.config) continue;
+    const proxies = collectNodes([item.config]).map((node) => node.name);
+    if (proxies.length === 0) continue;
+
+    const label = config.subscriptions[item.index]?.label?.trim();
+    const baseName = `📦 ${label || `订阅 ${item.index + 1}`}`;
+    let name = baseName;
+    let suffix = 2;
+    while (used.has(name)) {
+      name = `${baseName} (${suffix})`;
+      suffix += 1;
+    }
+    used.add(name);
+    groups.push({ name, type: "select", proxies });
+  }
+
+  return groups;
 }
 
 /**
@@ -138,30 +187,44 @@ export function fixRuleGroup(
   return parts.join(",");
 }
 
-/** 把一条自定义规则拼成完整规则行 */
-export function buildCustomRule(r: CustomRule): string {
-  if (!r || !r.value) return "";
-  if (r.type === "RAW") return r.value.trim();
-  const v = r.value.trim();
-  if (!v || !r.group) return "";
-  switch (r.type) {
-    case "DOMAIN":
-      return `DOMAIN,${v},${r.group}`;
-    case "DOMAIN-SUFFIX":
-      return `DOMAIN-SUFFIX,${v},${r.group}`;
-    case "DOMAIN-KEYWORD":
-      return `DOMAIN-KEYWORD,${v},${r.group}`;
-    case "IP-CIDR": {
-      const cidr = v.includes("/") ? v : `${v}/32`;
-      return `IP-CIDR,${cidr},${r.group},no-resolve`;
-    }
-    default:
-      return "";
+/** 把一批 Host / IP 输入展开成完整规则行。 */
+export function buildCustomRules(r: CustomRule): string[] {
+  if (!r || !r.value) return [];
+  if (r.type === "RAW") {
+    return r.value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
   }
+  if (!r.group) return [];
+
+  const values = r.value
+    .split(/[\s,，]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  return values
+    .map((value) => {
+      switch (r.type) {
+        case "DOMAIN":
+          return `DOMAIN,${value},${r.group}`;
+        case "DOMAIN-SUFFIX":
+          return `DOMAIN-SUFFIX,${value},${r.group}`;
+        case "DOMAIN-KEYWORD":
+          return `DOMAIN-KEYWORD,${value},${r.group}`;
+        case "IP-CIDR": {
+          const cidr = value.includes("/") ? value : `${value}/32`;
+          return `IP-CIDR,${cidr},${r.group},no-resolve`;
+        }
+        default:
+          return "";
+      }
+    })
+    .filter(Boolean);
 }
 
 /** 输出配置的固定顶层设置（端口/DNS 等） */
-const DEFAULT_SETTINGS: Record<string, any> = {
+const DEFAULT_SETTINGS: Record<string, unknown> = {
   port: 7890,
   "socks-port": 7891,
   "allow-lan": false,
@@ -179,14 +242,14 @@ const DEFAULT_SETTINGS: Record<string, any> = {
   },
 };
 
-const MAIN_GROUP = "🚀 选择节点";
-const AUTO_GROUP = "♻️ 自动选择";
 const TEST_URL = "http://www.gstatic.com/generate_204";
 
 /** 生成最终的 Clash YAML 配置文本 */
 export async function generateConfig(config: AppConfig): Promise<string> {
   const fetched = await fetchAllSubscriptions(config);
-  const nodeConfigs = fetched.map((f) => f.config).filter(Boolean);
+  const nodeConfigs = fetched
+    .map((f) => f.config)
+    .filter((item): item is ClashConfig => item !== null);
   if (nodeConfigs.length === 0) {
     throw new Error("所有订阅都拉取失败，无法生成");
   }
@@ -217,23 +280,33 @@ export async function generateConfig(config: AppConfig): Promise<string> {
       proxies: [...nodeNames],
     },
   ].filter((g) => !groupNames.has(g.name));
-  const allGroups = [...builtinGroups, ...groups];
-  const validGroups = new Set(allGroups.map((g) => g.name));
-  const fallbackGroup = validGroups.has(MAIN_GROUP)
+  const sourceGroups = buildSourceGroups(
+    config,
+    fetched,
+    [...groupNames, MAIN_GROUP, AUTO_GROUP],
+  );
+  const allGroups = [...builtinGroups, ...sourceGroups, ...groups];
+  const validTargets = new Set([
+    ...allGroups.map((g) => g.name),
+    ...nodeNames,
+    ...ALWAYS_AVAILABLE_TARGETS,
+  ]);
+  const fallbackGroup = validTargets.has(MAIN_GROUP)
     ? MAIN_GROUP
     : (allGroups[0]?.name ?? MAIN_GROUP);
 
-  // 基础规则类别 → 节点组 的映射（只保留指向存在的组的映射）
+  // iKuuu 原规则类别 → 规则目标。
+  // 目标既可以是策略组，也可以是导入的单个节点或 Clash 内置的 DIRECT/REJECT。
   const mapping = new Map<string, string>();
   for (const m of config.ruleMapping) {
-    if (validGroups.has(m.group)) mapping.set(m.category, m.group);
+    if (validTargets.has(m.group)) mapping.set(m.category, m.group);
   }
 
   // 自定义规则（最高优先级）
   const custom = config.customRules
-    .map(buildCustomRule)
+    .flatMap(buildCustomRules)
     .filter(Boolean)
-    .map((r) => fixRuleGroup(r, validGroups, fallbackGroup));
+    .map((r) => fixRuleGroup(r, validTargets, fallbackGroup));
 
   // 基础规则重写
   const remapped = baseRules
@@ -256,7 +329,9 @@ export async function generateConfig(config: AppConfig): Promise<string> {
 /** 预览：返回所有节点、每个节点组的匹配结果、基础规则类别 */
 export async function previewConfig(config: AppConfig): Promise<PreviewResult> {
   const fetched = await fetchAllSubscriptions(config);
-  const nodeConfigs = fetched.map((f) => f.config).filter(Boolean);
+  const nodeConfigs = fetched
+    .map((f) => f.config)
+    .filter((item): item is ClashConfig => item !== null);
   const nodes = collectNodes(nodeConfigs);
   const nodeNames = nodes.map((n) => n.name);
 
@@ -291,6 +366,11 @@ export async function previewConfig(config: AppConfig): Promise<PreviewResult> {
     }
     return { name: g.name, nodes: matched };
   });
+  const sourceGroups = buildSourceGroups(
+    config,
+    fetched,
+    [...config.groups.map((g) => g.name), MAIN_GROUP, AUTO_GROUP],
+  ).map((group) => ({ name: group.name, nodes: group.proxies }));
 
   const categories = Array.from(
     new Set(
@@ -309,6 +389,7 @@ export async function previewConfig(config: AppConfig): Promise<PreviewResult> {
 
   return {
     allNodes: nodeNames,
+    sourceGroups,
     groups,
     categories,
     warnings,

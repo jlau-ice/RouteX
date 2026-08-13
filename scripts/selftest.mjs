@@ -67,13 +67,11 @@ function encode(cfg) {
 }
 
 function suggest(cat, groups) {
-  const byType = (t) => groups.find((g) => g.type === t)?.name;
   const byName = (re) => groups.find((g) => re.test(g.name))?.name;
-  if (/国内|直连/.test(cat)) return byType("direct") ?? byName(/直连/) ?? groups[0].name;
-  if (/广告|拦截/.test(cat)) return byType("reject") ?? byType("direct") ?? "";
-  if (/动画疯|巴哈|台湾/.test(cat)) return byName(/台湾/) ?? byType("all") ?? groups[0].name;
-  if (/选择节点|漏网|全局/.test(cat)) return byType("all") ?? groups[0].name;
-  return byType("all") ?? groups[0].name;
+  if (/国内|直连/.test(cat)) return "DIRECT";
+  if (/广告|拦截/.test(cat)) return "REJECT";
+  if (/动画疯|巴哈|台湾/.test(cat)) return byName(/台湾/) ?? "🚀 选择节点";
+  return "🚀 选择节点";
 }
 
 // 等 dev server 就绪
@@ -90,6 +88,7 @@ const previewRes = await fetch(`${BASE}/api/preview`, {
 const preview = await previewRes.json();
 if (!previewRes.ok) { console.error("预览失败:", preview); process.exit(1); }
 console.log("总节点数:", preview.allNodes.length);
+for (const g of preview.sourceGroups) console.log(`  导入订阅组「${g.name}」→ ${g.nodes.length} 个`);
 for (const g of preview.groups) console.log(`  组「${g.name}」→ ${g.nodes.length} 个`);
 console.log("规则类别:", preview.categories);
 console.log("警告:", preview.warnings);
@@ -98,19 +97,38 @@ console.log("警告:", preview.warnings);
 config.ruleMapping = preview.categories
   .map((cat) => ({ category: cat, group: suggest(cat, config.groups) }))
   .filter((m) => m.group);
+
+// 单独把一个 iKuuu 规则类别指向实际导入节点，验证“选择单个节点”的完整链路。
+const singleNodeMapping = config.ruleMapping.find((m) =>
+  /爱奇艺|哔哩哔哩|选择节点/.test(m.category),
+);
+if (singleNodeMapping && preview.allNodes[0]) {
+  singleNodeMapping.group = preview.allNodes[0];
+}
 console.log("\n===== 2) 默认推荐映射 =====");
 for (const m of config.ruleMapping) console.log(`  ${m.category} → ${m.group}`);
 
-console.log("\n===== 3) 生成订阅 YAML =====");
-const enc = encode(config);
-console.log("编码后配置长度:", enc.length, "字符");
-const subRes = await fetch(`${BASE}/api/sub?c=${enc}`);
+console.log("\n===== 3) 保存 Supabase 配置快照 =====");
+const saveRes = await fetch(`${BASE}/api/config`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ config }),
+});
+const saved = await saveRes.json();
+if (!saveRes.ok || typeof saved.id !== "string") {
+  console.error("保存失败:", saved);
+  process.exit(1);
+}
+console.log("配置 ID:", saved.id);
+
+console.log("\n===== 4) 生成订阅 YAML =====");
+const subRes = await fetch(`${BASE}/api/sub?id=${saved.id}`);
 const text = await subRes.text();
 console.log("HTTP", subRes.status, "| 内容长度:", text.length, "字符");
 if (!subRes.ok) { console.error(text); process.exit(1); }
 
 const out = yaml.parse(text);
-console.log("\n===== 4) 校验输出 =====");
+console.log("\n===== 5) 校验输出 =====");
 console.log("proxies 节点数:", out.proxies.length);
 console.log("顶层设置: port =", out.port, "| mode =", out.mode, "| dns.enable =", out.dns?.enable, "| external-controller =", out["external-controller"]);
 const manualGroup = out["proxy-groups"].find((g) => g.name === "新加坡精选（手动）");
@@ -145,9 +163,18 @@ for (const r of out.rules) {
   const t = parts[parts.length - 1] === "no-resolve" ? parts[parts.length - 2] : parts[parts.length - 1];
   if (t) targetCounts[t] = (targetCounts[t] || 0) + 1;
 }
-console.log("\n===== 5) 重写正确性 =====");
+console.log("\n===== 6) 重写正确性 =====");
 console.log("规则目标分布:", targetCounts);
 console.log("chatgpt 自定义规则存在:", out.rules.some((r) => r.startsWith("DOMAIN-SUFFIX,chatgpt.com,")));
 console.log("动画疯→台湾节点 重写成功:", out.rules.some((r) => r.endsWith(",台湾节点")));
-console.log("国内网站→直连 重写成功:", out.rules.some((r) => r.endsWith(",直连")));
-console.log("拦截广告→拒绝 重写成功:", out.rules.some((r) => r.endsWith(",拒绝")));
+console.log("国内网站→DIRECT 重写成功:", out.rules.some((r) => r.endsWith(",DIRECT")));
+console.log("拦截广告→REJECT 重写成功:", out.rules.some((r) => r.endsWith(",REJECT")));
+console.log(
+  "iKuuu 规则→实际单节点 重写成功:",
+  Boolean(singleNodeMapping) && out.rules.some((r) => r.endsWith(`,${singleNodeMapping.group}`)),
+);
+
+console.log("\n===== 7) 旧版链接兼容 =====");
+const enc = encode(config);
+const legacyRes = await fetch(`${BASE}/api/sub?c=${enc}`);
+console.log("旧版链接 HTTP", legacyRes.status, legacyRes.ok ? "✔" : "✘");

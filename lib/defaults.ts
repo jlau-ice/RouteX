@@ -42,26 +42,24 @@ export function buildDefaultConfig(): AppConfig {
       { id: "jp", name: "日本节点", type: "auto", pattern: "日本|🇯🇵|[-.]jp\\d" },
       { id: "hk", name: "香港节点", type: "auto", pattern: "香港|🇭🇰|[-.]hk\\d" },
       { id: "all", name: "全部节点", type: "all" },
-      { id: "direct", name: "直连", type: "direct" },
-      { id: "reject", name: "拒绝", type: "reject" },
     ],
     ruleMapping: [],
     customRules: [
-      ...DATABASE_IPS.map((ip) => ({
-        type: "IP-CIDR" as const,
-        value: ip,
+      {
+        type: "IP-CIDR",
+        value: DATABASE_IPS.join("\n"),
         group: "数据库-新加坡",
-      })),
-      ...SINGAPORE_DOMAINS.map((d) => ({
-        type: "DOMAIN-SUFFIX" as const,
-        value: d,
+      },
+      {
+        type: "DOMAIN-SUFFIX",
+        value: SINGAPORE_DOMAINS.join("\n"),
         group: "数据库-新加坡",
-      })),
-      ...CHATGPT_DOMAINS.map((d) => ({
-        type: "DOMAIN-SUFFIX" as const,
-        value: d,
+      },
+      {
+        type: "DOMAIN-SUFFIX",
+        value: CHATGPT_DOMAINS.join("\n"),
         group: "ChatGPT-美国",
-      })),
+      },
     ],
   };
 }

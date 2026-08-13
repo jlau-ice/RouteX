@@ -343,9 +343,13 @@ export async function generateConfig(config: AppConfig): Promise<string> {
 
   // iKuuu 原规则类别 → 规则目标。
   // 目标既可以是策略组，也可以是导入的单个节点或 Clash 内置的 DIRECT/REJECT。
-  const mapping = new Map<string, string>();
+  const mapping = new Map<string, string[]>();
   for (const m of config.ruleMapping) {
-    if (validTargets.has(m.group)) mapping.set(m.category, m.group);
+    const requested = m.targets?.length ? m.targets : [m.group];
+    const targets = Array.from(new Set(requested)).filter((target) =>
+      validTargets.has(target),
+    );
+    if (targets.length > 0) mapping.set(m.category, targets);
   }
 
   // 保留 iKuuu 原策略组名称。网页中的映射只决定每个策略组内部
@@ -353,7 +357,7 @@ export async function generateConfig(config: AppConfig): Promise<string> {
   const categoryGroups = categories.map((category) => ({
     name: category,
     type: "select",
-    proxies: [mapping.get(category) ?? fallbackGroup],
+    proxies: mapping.get(category) ?? [fallbackGroup],
   }));
   const allGroups = [...categoryGroups, ...selectableGroups];
 

@@ -74,7 +74,11 @@ export function validateAppConfig(value: unknown): string | null {
       (item) =>
         isRecord(item) &&
         isShortString(item.category, 500) &&
-        isShortString(item.group, 200),
+        isShortString(item.group, 200) &&
+        (item.targets === undefined ||
+          (Array.isArray(item.targets) &&
+            item.targets.length <= 10_000 &&
+            item.targets.every((target) => isShortString(target, 500)))),
     )
   ) {
     return "规则映射格式无效";

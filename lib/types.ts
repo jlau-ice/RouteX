@@ -36,6 +36,8 @@ export interface RuleMappingEntry {
   category: string;
   /** 该策略组内部选择的单节点、用户节点组、选择节点、DIRECT 或 REJECT */
   group: string;
+  /** 多选目标；旧配置没有此字段时自动使用 group 作为唯一目标。 */
+  targets?: string[];
 }
 
 export interface AppConfig {

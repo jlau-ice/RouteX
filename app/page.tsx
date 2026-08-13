@@ -130,6 +130,147 @@ function NodePicker({
   );
 }
 
+type TargetSection = { label: string; options: { value: string; label: string }[] };
+
+function MultiRuleTargetPicker({
+  selected,
+  sourceGroupNames,
+  groupNames,
+  nodeNames,
+  onChange,
+}: {
+  selected: string[];
+  sourceGroupNames: string[];
+  groupNames: string[];
+  nodeNames: string[];
+  onChange: (targets: string[]) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const sections = useMemo<TargetSection[]>(
+    () => [
+      {
+        label: "内置策略",
+        options: [
+          { value: MAIN_GROUP, label: "选择节点（Clash 中手动切换）" },
+          { value: AUTO_GROUP, label: "自动选择（测速）" },
+          { value: DIRECT_TARGET, label: "直连（DIRECT）" },
+          { value: REJECT_TARGET, label: "拒绝（REJECT）" },
+        ],
+      },
+      {
+        label: "导入的订阅节点组",
+        options: sourceGroupNames.map((value) => ({ value, label: value })),
+      },
+      {
+        label: "自定义节点组",
+        options: groupNames.map((value) => ({ value, label: value })),
+      },
+      {
+        label: `自动识别的单个节点（${nodeNames.length}）`,
+        options: nodeNames.map((value) => ({ value, label: value })),
+      },
+    ],
+    [groupNames, nodeNames, sourceGroupNames],
+  );
+  const knownTargets = useMemo(
+    () => new Set(sections.flatMap((section) => section.options.map((option) => option.value))),
+    [sections],
+  );
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleSections = sections
+    .map((section) => ({
+      ...section,
+      options: normalizedQuery
+        ? section.options.filter((option) =>
+            option.label.toLowerCase().includes(normalizedQuery),
+          )
+        : section.options,
+    }))
+    .filter((section) => section.options.length > 0);
+  const invalidTargets = selected.filter((target) => !knownTargets.has(target));
+  const toggle = (target: string) => {
+    if (selectedSet.has(target)) {
+      onChange(selected.filter((value) => value !== target));
+    } else {
+      onChange([...selected, target]);
+    }
+  };
+  const summary =
+    selected.length === 0
+      ? "请选择节点或节点组"
+      : selected.length <= 2
+        ? selected.join("、")
+        : `${selected.slice(0, 2).join("、")} 等 ${selected.length} 项`;
+
+  return (
+    <details className="relative sm:w-96">
+      <summary className={`${inputCls} cursor-pointer list-none pr-8`}>
+        <span className="block truncate">{summary}</span>
+        <span className="pointer-events-none absolute right-3 top-2.5 text-zinc-400">⌄</span>
+      </summary>
+      <div className="right-0 z-30 mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-900 p-3 shadow-2xl sm:absolute sm:min-w-96">
+        <div className="flex items-center gap-2">
+          <input
+            className={inputCls}
+            placeholder="搜索节点或节点组…"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <button
+            type="button"
+            className={`${btnGhost} shrink-0 !px-3`}
+            onClick={() => onChange([])}
+            disabled={selected.length === 0}
+          >
+            清空
+          </button>
+        </div>
+        <p className="mt-2 text-xs text-zinc-500">
+          已选 {selected.length} 项，可同时选择多个节点和节点组。
+        </p>
+        <div className="mt-2 max-h-72 space-y-3 overflow-y-auto pr-1">
+          {invalidTargets.length > 0 && (
+            <div>
+              <div className="mb-1 text-xs font-medium text-amber-400">已失效目标</div>
+              {invalidTargets.map((target) => (
+                <label key={target} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-zinc-800">
+                  <input
+                    type="checkbox"
+                    checked
+                    onChange={() => toggle(target)}
+                    className="accent-sky-500"
+                  />
+                  <span className="truncate text-amber-300">{target}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          {visibleSections.map((section) => (
+            <div key={section.label}>
+              <div className="mb-1 text-xs font-medium text-zinc-500">{section.label}</div>
+              {section.options.map((option) => (
+                <label key={option.value} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-zinc-800">
+                  <input
+                    type="checkbox"
+                    checked={selectedSet.has(option.value)}
+                    onChange={() => toggle(option.value)}
+                    className="accent-sky-500"
+                  />
+                  <span className="truncate">{option.label}</span>
+                </label>
+              ))}
+            </div>
+          ))}
+          {visibleSections.length === 0 && invalidTargets.length === 0 && (
+            <p className="py-4 text-center text-sm text-zinc-500">没有匹配项</p>
+          )}
+        </div>
+      </div>
+    </details>
+  );
+}
+
 function RuleTargetOptions({
   currentValue,
   sourceGroupNames,
@@ -362,14 +503,18 @@ export default function Home() {
     });
 
   /* --- 规则映射 --- */
-  const upsertMapping = (category: string, group: string) =>
+  const upsertMapping = (category: string, targets: string[]) =>
     setConfig((c) => {
+      const uniqueTargets = Array.from(new Set(targets));
+      const group = uniqueTargets[0] ?? "";
       const exists = c.ruleMapping.some((m) => m.category === category);
       const ruleMapping = exists
         ? c.ruleMapping.map((m) =>
-            m.category === category ? { ...m, group } : m,
+            m.category === category
+              ? { ...m, group, targets: uniqueTargets }
+              : m,
           )
-        : [...c.ruleMapping, { category, group }];
+        : [...c.ruleMapping, { category, group, targets: uniqueTargets }];
       return { ...c, ruleMapping };
     });
 
@@ -418,6 +563,7 @@ export default function Home() {
             .map((cat) => ({
               category: cat,
               group: suggestGroupName(cat, c.groups),
+              targets: [suggestGroupName(cat, c.groups)],
             }))
             .filter((m) => m.group);
           return {
@@ -583,8 +729,11 @@ export default function Home() {
       (name) => !reserved.has(name),
     );
   }, [groupNames, preview?.allNodes, sourceGroupNames]);
-  const mappedGroup = (cat: string) =>
-    config.ruleMapping.find((m) => m.category === cat)?.group ?? "";
+  const mappedTargets = (cat: string) => {
+    const mapping = config.ruleMapping.find((item) => item.category === cat);
+    if (!mapping) return [];
+    return mapping.targets?.length ? mapping.targets : mapping.group ? [mapping.group] : [];
+  };
   const applyRecommendedTargets = () => {
     if (!preview) return;
     setConfig((c) => ({
@@ -592,6 +741,7 @@ export default function Home() {
       ruleMapping: preview.categories.map((category) => ({
         category,
         group: suggestGroupName(category, c.groups),
+        targets: [suggestGroupName(category, c.groups)],
       })),
     }));
   };
@@ -602,7 +752,7 @@ export default function Home() {
         <header className="mb-8">
           <h1 className="text-2xl font-bold">RouteX · 订阅聚合 · 规则可视化配置</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            保留 iKuuu 原始规则，自动识别所有导入节点；每类规则可指定单个节点、节点组、直连或拒绝。
+            保留 iKuuu 原始规则，自动识别所有导入节点；每个策略组可同时选择多个节点或节点组。
           </p>
         </header>
 
@@ -784,7 +934,7 @@ export default function Home() {
               使用项目内置的 iKuuu 规则集，包括动画疯、爱奇艺&哔哩哔哩、选择节点、国内网站等；这些名称会保留为 Clash 策略组，这里选择各组内部使用的节点目标。
             </p>
             <p className="mt-1 text-xs text-zinc-500">
-              每条规则一次选择一个目标：可以是单个实际节点，也可以是导入订阅组或上面新建的自定义节点组。
+              每个规则策略组可以同时选择多个单节点、导入订阅组或自定义节点组；生成后可在 Clash 中切换。
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <button className={btnPrimary} onClick={runPreview} disabled={loading}>
@@ -856,21 +1006,13 @@ export default function Home() {
                         <div className="flex-1 truncate text-sm text-zinc-200">
                           {cat}
                         </div>
-                        <select
-                          className={`${inputCls} sm:w-80`}
-                          value={mappedGroup(cat)}
-                          onChange={(e) => upsertMapping(cat, e.target.value)}
-                        >
-                          <option value="" disabled>
-                            选择节点 / 节点组 / 直连
-                          </option>
-                          <RuleTargetOptions
-                            currentValue={mappedGroup(cat)}
-                            sourceGroupNames={sourceGroupNames}
-                            groupNames={groupNames}
-                            nodeNames={nodeNames}
-                          />
-                        </select>
+                        <MultiRuleTargetPicker
+                          selected={mappedTargets(cat)}
+                          sourceGroupNames={sourceGroupNames}
+                          groupNames={groupNames}
+                          nodeNames={nodeNames}
+                          onChange={(targets) => upsertMapping(cat, targets)}
+                        />
                       </div>
                     ))}
                   </div>

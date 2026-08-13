@@ -15,6 +15,15 @@
 - **零数据库**：配置保存在浏览器 localStorage，并编码进订阅链接（`/api/sub?c=…`）
 - **规则可更新**：iKuuu 规则更新后，运行 `node scripts/extract-base-rules.mjs` 重新生成内置规则集
 
+## Supabase 云存储（可选）
+
+把配置保存到 Supabase、生成短链（`/api/sub?id=&k=`），改配置后一键更新。
+
+- SQL：执行 `supabase/schema.sql`（Supabase SQL Editor）
+- 环境变量：`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`（Vercel → Settings → Environment Variables）
+- 完整迁移方案见 `SUPABASE_MIGRATION.md`
+- 未配置 Supabase 时相关接口返回 501，base64 链接不受影响
+
 ## 本地运行
 
 ```bash
@@ -29,7 +38,9 @@ npm run dev
 | 接口 | 说明 |
 |------|------|
 | `GET /api/sub?c=<配置>` | 拉取订阅 → 合并 → 按配置重写规则 → 返回 Clash YAML（填进 Clash 的订阅地址） |
+| `GET /api/sub?id=&k=` | 从 Supabase 读取已保存配置生成 YAML（短链） |
 | `POST /api/preview` | body `{ config }`，返回总节点 / 各节点组匹配数 / 基础规则类别 |
+| `POST /api/save` / `GET /api/load` / `POST /api/update` / `POST /api/delete` | 配置云端存储（密链模型），需配置 Supabase |
 
 ## 部署到 Vercel
 

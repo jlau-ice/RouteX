@@ -1,36 +1,74 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# RouteX
 
-## Getting Started
+多订阅聚合 + 规则可视化配置，输出单一订阅链接给 Clash 使用。
 
-First, run the development server:
+把多个机场订阅合并成一个；从指定的“基础订阅”提取规则类别，为每个类别选择承接的节点组；
+支持自定义规则（最高优先级）。配置通过前端页面编辑，编码进订阅链接，无需数据库。
+
+## 功能
+
+- **订阅聚合**：可填多个订阅地址，节点全部合并去重（按节点名）
+- **基础规则**：选定一个订阅作为规则来源，自动提取其规则类别（如 动画疯 / Steam / 国内网站 / 广告拦截…）
+- **节点组**：用正则自动识别节点（新加坡 / 美国 / 台湾 / 日本 / 香港…），生成后在 Clash 里可手动切换
+- **规则映射**：每个基础规则类别 → 选择承接的节点组（默认按关键词推荐）
+- **自定义规则**：新增域名 / IP 规则并指定节点组，最高优先级
+- **零数据库**：配置保存在浏览器 localStorage，并编码进订阅链接（`/api/sub?c=…`）
+
+## 本地运行
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+打开 http://localhost:3000 即可使用。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 接口
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| 接口 | 说明 |
+|------|------|
+| `GET /api/sub?c=<配置>` | 拉取订阅 → 合并 → 按配置重写规则 → 返回 Clash YAML（填进 Clash 的订阅地址） |
+| `POST /api/preview` | body `{ config }`，返回总节点 / 各节点组匹配数 / 基础规则类别 |
 
-## Learn More
+## 部署到 Vercel
 
-To learn more about Next.js, take a look at the following resources:
+**方式 A：Vercel CLI**
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm i -g vercel
+vercel        # 首次会要求登录并选择项目
+vercel --prod # 部署到生产
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**方式 B：GitHub 导入**
 
-## Deploy on Vercel
+把本项目推送到 GitHub 仓库，然后在 [vercel.com/new](https://vercel.com/new) 导入该仓库即可，无需任何环境变量。
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 在 Clash Verge Rev 中使用
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. 打开 RouteX 页面，配置好订阅 / 节点组 / 规则映射 / 自定义规则
+2. 点击「预览/提取规则」确认节点数与规则类别
+3. 点击「生成订阅链接」，复制生成的地址
+4. Clash Verge Rev → 订阅 → 添加订阅，粘贴地址即可
+5. 之后机场更新节点时，Clash 按设定的刷新周期拉取该地址，自动拿到最新合并结果
+
+## 安全说明
+
+- 订阅地址（含 token）只在 `/api/sub` 的服务端拉取，浏览器不会直接访问机场接口（有 CORS 限制）
+- 配置编码在订阅链接里，谁拿到链接谁就能读到其中的订阅地址。不要公开分享这个链接
+
+## 目录结构
+
+```
+app/
+  page.tsx           # 配置界面（纯前端 React）
+  api/sub/route.ts   # 订阅生成接口
+  api/preview/route.ts # 预览接口
+lib/
+  types.ts           # 配置类型
+  defaults.ts        # 默认配置（含预填的数据库 IP / ChatGPT 域名）
+  core.ts            # 合并 / 正则识别 / 规则重写 / YAML 生成
+scripts/
+  selftest.mjs       # 端到端自测脚本
+  Script-v2.js       # 兼容双订阅的全局扩展脚本（备用）
+```

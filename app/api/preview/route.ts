@@ -3,6 +3,7 @@ import { previewConfig } from "@/lib/core";
 import { validateAppConfig } from "@/lib/config-validation";
 import type { AppConfig } from "@/lib/types";
 import { getErrorMessage } from "@/lib/errors";
+import { readConfigBody } from "@/lib/request-body";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,8 +12,8 @@ export const maxDuration = 60;
 export async function POST(req: NextRequest) {
   let config: AppConfig;
   try {
-    const body = await req.json();
-    config = body?.config;
+    const body = await readConfigBody(req);
+    config = body?.config as AppConfig;
     if (!config) throw new Error("缺少 config");
   } catch {
     return Response.json({ error: "请求体解析失败" }, { status: 400 });
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const result = await previewConfig(config);
-    return Response.json(result);
+    return Response.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error: unknown) {
     return Response.json(
       { error: `预览失败：${getErrorMessage(error)}` },

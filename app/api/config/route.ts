@@ -7,6 +7,7 @@ import {
   updateConfig,
 } from "@/lib/supabase-storage";
 import type { AppConfig } from "@/lib/types";
+import { readConfigBody } from "@/lib/request-body";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,13 +54,16 @@ export async function POST(request: Request) {
   }
 
   const declaredLength = Number(request.headers.get("content-length") ?? 0);
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_CONFIG_BYTES + 4096) {
+  if (
+    Number.isFinite(declaredLength) &&
+    declaredLength > MAX_CONFIG_BYTES + 4096
+  ) {
     return Response.json({ error: "配置超过 1 MiB" }, { status: 413 });
   }
 
   let config: unknown;
   try {
-    const body = await request.json();
+    const body = await readConfigBody(request);
     config = body?.config;
   } catch {
     return Response.json({ error: "请求体解析失败" }, { status: 400 });
@@ -93,7 +97,7 @@ export async function PUT(request: Request) {
 
   let body: unknown;
   try {
-    body = await request.json();
+    body = await readConfigBody(request);
   } catch {
     return Response.json({ error: "请求体解析失败" }, { status: 400 });
   }

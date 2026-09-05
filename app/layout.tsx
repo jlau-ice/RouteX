@@ -1,29 +1,21 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "RouteX · 订阅聚合配置",
-  description: "RouteX：多订阅聚合 + 规则可视化配置，生成单一订阅链接",
+  title: "RouteX · 让每条线路各得其所",
+  description:
+    "聚合多个 Clash 订阅，沿用 iKuuu 分流规则，为 ChatGPT 和日常上网配置专属节点。",
+  robots: { index: false, follow: false },
+  referrer: "no-referrer",
 };
-
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html
-      lang="zh-CN"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="zh-CN">
+      <body>{children}</body>
     </html>
   );
 }

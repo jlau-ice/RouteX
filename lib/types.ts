@@ -13,6 +13,10 @@ export interface NodeGroup {
   pattern?: string;
   /** type=manual 时手动勾选的节点名列表 */
   nodes?: string[];
+  /** 限定到一个订阅来源；不设置时使用全部来源。 */
+  sourceId?: string;
+  strategy?: "select" | "url-test" | "fallback";
+  preferred?: string;
 }
 
 /** 自定义规则 */
@@ -26,8 +30,10 @@ export interface CustomRule {
 
 /** 订阅来源 */
 export interface SubscriptionSource {
+  id?: string;
   url: string;
   label?: string;
+  enabled?: boolean;
 }
 
 /** iKuuu 规则策略组 → 组内可执行目标的映射 */
@@ -57,13 +63,18 @@ export interface SubInfo {
   index: number;
   label: string;
   nodeCount: number;
+  sourceId: string;
+  status: "ok" | "error" | "disabled";
+  error?: string;
+  excludedCount?: number;
+  usage?: { used: number; total: number; expire?: number };
 }
 
 /** /api/preview 的返回结果 */
 export interface PreviewResult {
   allNodes: string[];
   /** 每个导入订阅自动形成的节点组 */
-  sourceGroups: { name: string; nodes: string[] }[];
+  sourceGroups: { name: string; nodes: string[]; sourceId: string }[];
   /** 每个节点组匹配到的节点 */
   groups: { name: string; nodes: string[] }[];
   /** 从基础订阅提取的规则类别 */
@@ -74,4 +85,5 @@ export interface PreviewResult {
   subscriptions: SubInfo[];
   /** 当前基础订阅的规则条数 */
   baseRuleCount: number;
+  categoryCounts: Record<string, number>;
 }

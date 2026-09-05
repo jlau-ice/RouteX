@@ -79,11 +79,15 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    assertAppConfig(config);
     const text = await generateConfig(config);
     return new Response(text, {
       headers: {
         "Content-Type": "text/yaml; charset=utf-8",
         "Cache-Control": "no-store",
+        "Content-Disposition": "inline; filename=routex.yaml",
+        "profile-update-interval": "6",
+        "X-Content-Type-Options": "nosniff",
       },
     });
   } catch (error: unknown) {

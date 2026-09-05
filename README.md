@@ -37,7 +37,38 @@ npm run build
 
 `lib/base-rules.json` 是 iKuuu 规则副本。`scripts/extract-base-rules.mjs` 可从本机 Clash 配置提取更新。`scripts/selftest.mjs` 是早期手工联调脚本，当前自动回归入口是 `npm test`。
 
-## 云端存储
+## 配置存储
+
+### 本地 PostgreSQL
+
+本地运行可以直接连接 PostgreSQL 16，不需要 Supabase。先创建项目独立数据库：
+
+```sh
+createdb -h 127.0.0.1 routex
+```
+
+在 `.env.local` 中设置连接地址（用户名按本机 PG 账户填写）：
+
+```sh
+DATABASE_URL=postgresql://your_username@127.0.0.1:5432/routex
+```
+
+初始化表并启动（Node.js 22.9+）：
+
+```sh
+npm run db:init
+npm run dev -- --hostname 127.0.0.1
+```
+
+打开 `http://127.0.0.1:3000`。本地模式的配置保存在 PostgreSQL，iKuuu 基础规则使用仓库副本，不请求 Supabase。数据库初始化可以重复执行，已有配置会保留。更新和恢复配置仍校验编辑凭证。
+
+本地聚合链接供同一电脑的 Clash 使用，刷新订阅时需保持 RouteX 和 PostgreSQL 运行。下载的 YAML 可直接导入其他设备。网站和数据库放在不同电脑时，请使用可达的服务地址。
+
+本地与 Supabase 的已发布配置分开保存，浏览器草稿继续保留。可用 JSON 备份转移配置；切换存储后导入另一模式的备份会生成新的链接，不复用原数据库的 ID。已有 Supabase 配置不会自动复制到本机。
+
+### Supabase / Vercel
+
+Vercel 部署时不设置 `DATABASE_URL`，继续使用 Supabase。`.env.local` 不提交到 Git，也不要把本机数据库地址配置到 Vercel。
 
 生产域名：`https://routex-amber.vercel.app`。
 

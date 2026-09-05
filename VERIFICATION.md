@@ -17,6 +17,15 @@
 - 云端保存后的 `/api/sub?id=…` 返回 80 节点 / 17 策略组 / 9,826 条规则，采用更新后的 GPT 默认节点；Mihomo v1.19.30 `-t` 再次通过。
 - 浏览器成功恢复同一云端配置并发布更新，显示已与云端同步。
 
+## 本机 PostgreSQL 模式
+
+- 本机 Homebrew PostgreSQL 16.14 已运行，创建独立的 `routex` 数据库，并执行 `postgres/schema.sql` 初始化配置表。
+- `.env.local` 配置 `DATABASE_URL`（已被 Git 忽略）。本地保存直接连接 PG，iKuuu 基础规则使用仓库副本，不请求 Supabase。未配置 `DATABASE_URL` 的 Vercel 环境继续使用原 Supabase。
+- `npm test` 更新为 14 项全部通过，新增真实 SQL 回归覆盖本地保存、读取、编辑凭证校验、原 ID 更新及存储模式切换。Lint 无新增问题；生产构建与 TypeScript 检查通过。
+- 本机真实 API 验证通过：保存、凭证恢复、原链接更新、错误凭证拒绝、订阅生成；直接读取本机 PG 确认配置及编辑凭证哈希已写入。浏览器已导入三个个人订阅配置并成功发布更新，显示「已与本机数据库同步」。
+- 本次本地联调 Qiwu 10 节点、FastFly 24 节点，共 34 节点 / 17 策略组 / 9,826 条规则。iKuuu 订阅请求暂报 `ECONNRESET`，其基础分流规则仍使用内置副本；这是本次拉取状态，与此前三个来源均成功的记录不同。
+- 本地与云端的已保存链接分别存储，切换模式不复用另一个数据库的 ID；JSON 备份仍可转移草稿。客户端刷新本地链接时，需要保持 RouteX 和 PostgreSQL 运行。
+
 ## 外部阻塞
 
 - Vercel 原项目：`routex`，团队 `ices-projects-d9a9adc7`。CLI 已关联原项目。部署被 Vercel 拒绝：`Your Team exceeded our fair use limits and has been blocked.`

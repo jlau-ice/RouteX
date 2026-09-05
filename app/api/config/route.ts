@@ -5,7 +5,7 @@ import {
   loadEditableConfig,
   saveConfig,
   updateConfig,
-} from "@/lib/supabase-storage";
+} from "@/lib/storage";
 import type { AppConfig } from "@/lib/types";
 import { readConfigBody } from "@/lib/request-body";
 

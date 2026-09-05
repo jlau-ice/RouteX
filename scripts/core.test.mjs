@@ -32,7 +32,7 @@ for (const file of fs.readdirSync(path.join(root, "lib"))) {
 }
 const require = createRequire(import.meta.url);
 const transport = require(path.join(folder, "subscription-fetch.js"));
-const storage = require(path.join(folder, "supabase-storage.js"));
+const storage = require(path.join(folder, "storage.js"));
 storage.loadBaseRules = async () => null;
 const core = require(path.join(folder, "core.js"));
 const validation = require(path.join(folder, "config-validation.js"));

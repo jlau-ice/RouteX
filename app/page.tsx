@@ -1,5 +1,8 @@
 import Workspace from "./components/workspace";
 import baseRules from "@/lib/base-rules.json";
+import { getStorageMode } from "@/lib/storage";
+
+export const dynamic = "force-dynamic";
 
 export default function Home() {
   const counts: Record<string, number> = {};
@@ -12,5 +15,13 @@ export default function Home() {
     )
       counts[target] = (counts[target] ?? 0) + 1;
   }
-  return <Workspace baseCounts={counts} baseCount={baseRules.length} />;
+  const storageMode = getStorageMode();
+  return (
+    <Workspace
+      key={storageMode}
+      baseCounts={counts}
+      baseCount={baseRules.length}
+      storageMode={storageMode}
+    />
+  );
 }

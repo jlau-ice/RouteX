@@ -8,6 +8,7 @@ import type {
   NodeGroup,
   PreviewResult,
   SubscriptionSource,
+  StorageMode,
 } from "@/lib/types";
 import { buildDefaultConfig } from "@/lib/defaults";
 import { isDraftConfig, validateAppConfig } from "@/lib/config-validation";
@@ -34,7 +35,13 @@ import {
 
 const DRAFT_KEY = "clash-agg-config-v1";
 const SAVED_KEY = "routex-saved-config-v1";
-type Saved = { id: string; editKey: string; url: string; config: AppConfig };
+type Saved = {
+  id: string;
+  editKey: string;
+  url: string;
+  config: AppConfig;
+  storage?: StorageMode;
+};
 type View = "sources" | "nodes" | "rules" | "publish";
 const VIEWS: { id: View; title: string; en: string; icon: IconName }[] = [
   { id: "sources", title: "订阅来源", en: "SUBSCRIPTIONS", icon: "layers" },
@@ -135,10 +142,15 @@ function replaceTargets(
 export default function Workspace({
   baseCounts,
   baseCount,
+  storageMode,
 }: {
   baseCounts: Record<string, number>;
   baseCount: number;
+  storageMode: StorageMode;
 }) {
+  const localDatabase = storageMode === "postgres";
+  const savedKey = localDatabase ? `${SAVED_KEY}-postgres` : SAVED_KEY;
+  const storageLabel = localDatabase ? "本机数据库" : "云端";
   const [config, setConfig] = useState<AppConfig>(buildDefaultConfig);
   const [ready, setReady] = useState(false);
   const [saved, setSaved] = useState<Saved | null>(null);
@@ -174,7 +186,7 @@ export default function Workspace({
     if (requestId.current === id) setPreview({ key: fingerprint(draft), data });
     return data;
   }, []);
-  const restoreCloud = useCallback(
+  const restoreSaved = useCallback(
     async (id: string, editKey: string) => {
       const data = await jsonRequest<{ id: string; config: AppConfig }>(
         `/api/config?id=${encodeURIComponent(id)}`,
@@ -189,13 +201,14 @@ export default function Workspace({
         editKey,
         url: `/api/sub?id=${data.id}`,
         config: draft,
+        storage: storageMode,
       });
       setPreview(null);
       setLoadInput("");
-      setMessage({ text: "已恢复云端配置，可以继续更新原订阅链接。" });
+      setMessage({ text: "已恢复配置，可以继续更新原订阅链接。" });
       await fetchPreview(draft);
     },
-    [fetchPreview],
+    [fetchPreview, storageMode],
   );
 
   useEffect(() => {
@@ -214,10 +227,13 @@ export default function Workspace({
               error: true,
             });
         }
-        const savedRaw = localStorage.getItem(SAVED_KEY);
+        const savedRaw = localStorage.getItem(savedKey);
         if (savedRaw) {
           const parsedSaved = JSON.parse(savedRaw);
-          if (validSaved(parsedSaved))
+          if (
+            validSaved(parsedSaved) &&
+            (parsedSaved.storage ?? "supabase") === storageMode
+          )
             setSaved({
               ...parsedSaved,
               url: `/api/sub?id=${parsedSaved.id}`,
@@ -240,7 +256,7 @@ export default function Workspace({
         if (id && key) {
           setBusy("正在恢复配置");
           try {
-            await restoreCloud(id, key);
+            await restoreSaved(id, key);
           } catch (error) {
             setMessage({ text: (error as Error).message, error: true });
           } finally {
@@ -259,18 +275,18 @@ export default function Workspace({
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [fetchPreview, restoreCloud]);
+  }, [fetchPreview, restoreSaved, savedKey, storageMode]);
 
   useEffect(() => {
     if (!ready) return;
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify(config));
-      if (saved) localStorage.setItem(SAVED_KEY, JSON.stringify(saved));
-      else localStorage.removeItem(SAVED_KEY);
+      if (saved) localStorage.setItem(savedKey, JSON.stringify(saved));
+      else localStorage.removeItem(savedKey);
     } catch {
       window.setTimeout(() => setStorageFailed(true), 0);
     }
-  }, [config, saved, ready]);
+  }, [config, saved, ready, savedKey]);
 
   const sourceKey = fingerprint(config);
   const currentPreview = preview?.key === sourceKey ? preview.data : null;
@@ -369,6 +385,7 @@ export default function Workspace({
         editKey,
         url: `/api/sub?id=${data.id}`,
         config: draft,
+        storage: storageMode,
       });
       setView("publish");
       setMessage({
@@ -595,7 +612,8 @@ export default function Workspace({
       const next = withIds(draft);
       setConfig(next);
       setSaved(
-        validSaved(value.saved)
+        validSaved(value.saved) &&
+          (value.saved.storage ?? "supabase") === storageMode
           ? {
               ...value.saved,
               url: `/api/sub?id=${value.saved.id}`,
@@ -656,7 +674,12 @@ export default function Workspace({
         <div className="sidebar-bottom">
           <span className="avatar">RX</span>
           <div>
-            个人配置空间<small>LOCAL DRAFT + CLOUD SYNC</small>
+            个人配置空间
+            <small>
+              {localDatabase
+                ? "LOCAL DRAFT + LOCAL DATABASE"
+                : "LOCAL DRAFT + CLOUD SYNC"}
+            </small>
           </div>
         </div>
       </aside>
@@ -1567,12 +1590,18 @@ export default function Workspace({
                       <br />
                       以后修改节点或规则，更新原链接即可。
                     </p>
+                    {localDatabase && (
+                      <p>
+                        配置保存在本机 PostgreSQL 中。客户端刷新订阅时，
+                        请保持这台电脑上的 RouteX 运行。
+                      </p>
+                    )}
                     <div className={`publish-status ${dirty ? "pending" : ""}`}>
                       <span className="status-dot" />
                       {saved
                         ? dirty
                           ? "有尚未发布的修改"
-                          : "已与云端配置同步"
+                          : `已与${storageLabel}同步`
                         : "当前配置尚未发布"}
                     </div>
                     {saved && (
@@ -1721,7 +1750,7 @@ export default function Workspace({
                             const [id, key] = loadInput.trim().split(/\s+/, 2);
                             if (!id || !key)
                               throw new Error("请填写完整的配置 ID 和编辑凭证");
-                            await restoreCloud(id, key);
+                            await restoreSaved(id, key);
                           })
                         }
                         disabled={!loadInput.trim()}
@@ -1752,7 +1781,7 @@ export default function Workspace({
               RouteX <span className="muted">/</span> Make every route yours.
             </span>
             <span>
-              本地草稿 · 云端同步 <span className="status-dot" />
+              本地草稿 · {storageLabel}同步 <span className="status-dot" />
             </span>
           </footer>
         </main>

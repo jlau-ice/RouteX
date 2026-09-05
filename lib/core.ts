@@ -9,7 +9,7 @@ import type {
   SubInfo,
 } from "./types";
 import baseRulesJson from "./base-rules.json";
-import { loadBaseRules } from "./supabase-storage";
+import { loadBaseRules } from "./storage";
 import { assertAppConfig, isRecord } from "./config-validation";
 import { fetchSubscriptionText } from "./subscription-fetch";
 import {

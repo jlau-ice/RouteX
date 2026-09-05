@@ -3,7 +3,7 @@ import { inflateSync } from "zlib";
 import { generateConfig } from "@/lib/core";
 import { supabase, hasSupabase } from "@/lib/supabase";
 import { assertAppConfig, MAX_CONFIG_BYTES } from "@/lib/config-validation";
-import { isConfigId, loadConfig } from "@/lib/supabase-storage";
+import { isConfigId, loadConfig } from "@/lib/storage";
 import type { AppConfig } from "@/lib/types";
 import { getErrorMessage } from "@/lib/errors";
 

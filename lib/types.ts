@@ -1,5 +1,7 @@
 // 订阅聚合服务的配置类型
 
+export type StorageMode = "postgres" | "supabase";
+
 /** 节点组类型 */
 export type GroupType = "auto" | "manual" | "all" | "direct" | "reject";
 

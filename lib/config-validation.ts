@@ -5,7 +5,9 @@ import { AUTO_GROUP, sourceGroupNames } from "./policies";
 export const MAX_CONFIG_BYTES = 1024 * 1024;
 
 export function isConfigId(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }
 
 const GROUP_TYPES = new Set<GroupType>([
@@ -67,7 +69,9 @@ export function isDraftConfig(value: unknown): value is AppConfig {
         isRecord(item) &&
         RULE_TYPES.has(item.type as CustomRule["type"]) &&
         typeof item.value === "string" &&
-        typeof item.group === "string",
+        typeof item.group === "string" &&
+        (item.note === undefined || typeof item.note === "string") &&
+        (item.enabled === undefined || typeof item.enabled === "boolean"),
     )
   );
 }
@@ -196,12 +200,15 @@ export function validateAppConfig(value: unknown): string | null {
         isRecord(item) &&
         RULE_TYPES.has(item.type as CustomRule["type"]) &&
         isShortString(item.value, 32768) &&
-        isShortString(item.group, 800),
+        isShortString(item.group, 800) &&
+        (item.note === undefined || isShortString(item.note, 200)) &&
+        (item.enabled === undefined || typeof item.enabled === "boolean"),
     )
   ) {
     return "自定义规则格式无效";
   }
   for (const rule of customRules) {
+    if (rule.enabled === false) continue;
     if (!rule.value.trim())
       return "自定义规则内容不能为空，请填写或删除空白规则";
     if (rule.type !== "RAW" && (!rule.group || /[,\r\n]/.test(rule.group)))

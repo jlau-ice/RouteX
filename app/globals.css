@@ -2340,3 +2340,317 @@ main {
     font-size: 10px;
   }
 }
+.routing-workspace {
+  display: grid;
+  gap: 24px;
+}
+.routing-flow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+  background: #e9eeeb;
+  border-radius: 12px;
+  color: #51655a;
+  font-size: 13px;
+}
+.routing-flow span {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.routing-flow b {
+  font-size: 11px;
+  color: #277456;
+}
+.routing-flow svg {
+  width: 16px;
+  flex-shrink: 0;
+}
+.routing-tabs {
+  display: flex;
+  gap: 6px;
+  width: fit-content;
+  background: #e8eae7;
+  padding: 5px;
+  border-radius: 10px;
+}
+.routing-tabs button {
+  padding: 10px 20px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #5b6a60;
+  font-weight: 600;
+  cursor: pointer;
+}
+.routing-tabs button[aria-selected="true"] {
+  background: #fff;
+  color: #183e2d;
+  box-shadow: 0 2px 5px #243a2910;
+}
+.routing-tabs button span {
+  margin-left: 8px;
+  font-size: 12px;
+}
+.quick-route {
+  padding: 28px;
+}
+.quick-route .panel-heading {
+  padding: 0 0 20px;
+}
+.quick-route h2 {
+  margin-top: 8px;
+}
+.route-purpose {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.route-purpose button {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: 8px 12px;
+  text-align: left;
+  border: 1px solid #dce3dd;
+  border-radius: 12px;
+  background: #fafbf8;
+  color: #314a3b;
+  padding: 18px;
+  cursor: pointer;
+}
+.route-purpose button.selected {
+  border-color: #2d805b;
+  background: #edf6ee;
+  box-shadow: inset 0 0 0 1px #2d805b;
+}
+.route-purpose svg {
+  grid-row: span 2;
+  width: 22px;
+}
+.route-purpose strong {
+  font-size: 14px;
+}
+.route-purpose small {
+  color: #627369;
+  line-height: 1.5;
+}
+.quick-route-fields {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 24px;
+}
+.quick-route-fields > div:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.quick-route-fields textarea {
+  min-height: 155px;
+}
+.quick-route-fields .button {
+  align-self: flex-start;
+  margin-top: auto;
+}
+.route-hint {
+  font-size: 13px;
+  color: #617467;
+  line-height: 1.7;
+  margin: 0;
+}
+.quick-route > .text-button {
+  margin-top: 20px;
+}
+.custom-panel > .search-input,
+.rule-library > .search-input {
+  margin: 0 24px 20px;
+}
+.personal-rule-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.personal-rule-heading > input {
+  min-width: 0;
+  font-weight: 600;
+  background: transparent;
+  border-color: transparent;
+}
+.personal-rule-heading > input:focus {
+  border-color: #2d805b;
+}
+.rule-enabled {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  font-size: 12px;
+  gap: 6px;
+  color: #66746a;
+}
+.rule-enabled input {
+  width: 16px;
+  height: 16px;
+  accent-color: #286c4e;
+}
+.rule-paused {
+  background: #f5f5f2;
+}
+.rule-paused .rule-index {
+  color: #82877e;
+}
+.base-rule-list {
+  min-height: 120px;
+  padding: 0 24px;
+}
+.base-rule-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 0.5fr);
+  gap: 22px;
+  align-items: center;
+  padding: 16px 0;
+  border-top: 1px solid #edf0ea;
+}
+.base-rule-item > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.base-rule-item strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.base-rule-item small {
+  color: #6d796f;
+  grid-column: 2;
+  font-size: 11px;
+}
+.rule-type-tag {
+  color: #586e60;
+  font-size: 9px;
+  border: 1px solid #d8e0d6;
+  border-radius: 4px;
+  padding: 3px 5px;
+}
+.base-rule-item select {
+  min-width: 0;
+  width: 100%;
+  font-size: 12px;
+}
+.rule-pagination {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 20px 24px;
+  border-top: 1px solid #edf0ea;
+}
+.rule-pagination > div {
+  display: flex;
+  gap: 8px;
+}
+.default-egress {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 28px;
+  align-items: center;
+  padding: 26px;
+  margin-bottom: 24px;
+}
+.default-egress h2 {
+  margin: 8px 0;
+  font-size: 21px;
+}
+.default-egress p,
+.publish-changes p {
+  color: #657469;
+  line-height: 1.7;
+  font-size: 13px;
+  margin: 0;
+}
+.egress-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 12px;
+  font-size: 12px;
+}
+.publish-changes {
+  display: grid;
+  grid-template-columns: 1fr 1.7fr;
+  padding: 26px;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+.publish-changes h3 {
+  margin: 8px 0;
+}
+.publish-changes ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #45604e;
+  font-size: 13px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .routing-flow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .routing-flow > svg {
+    display: none;
+  }
+  .route-purpose {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .route-purpose button {
+    padding: 14px;
+  }
+  .quick-route,
+  .default-egress,
+  .publish-changes {
+    padding: 20px;
+  }
+  .quick-route-fields,
+  .default-egress,
+  .publish-changes {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .personal-rule-heading {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .personal-rule-heading > input {
+    flex: 1 1 180px;
+  }
+  .base-rule-item {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .base-rule-item > div {
+    grid-template-columns: 1fr;
+  }
+  .base-rule-item small {
+    grid-column: 1;
+  }
+  .rule-type-tag {
+    width: fit-content;
+  }
+  .routing-tabs {
+    width: 100%;
+  }
+  .routing-tabs button {
+    padding: 10px 12px;
+    flex: 1;
+  }
+}

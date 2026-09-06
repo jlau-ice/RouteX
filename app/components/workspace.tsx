@@ -4,18 +4,17 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AppConfig,
-  CustomRule,
   NodeGroup,
   PreviewResult,
   SubscriptionSource,
   StorageMode,
 } from "@/lib/types";
 import { buildDefaultConfig } from "@/lib/defaults";
+import { publishChanges } from "@/lib/routing-editor";
+import RulesWorkspace from "./rules-workspace";
 import { isDraftConfig, validateAppConfig } from "@/lib/config-validation";
 import {
   AUTO_GROUP,
-  CHATGPT_DOMAINS,
-  GPT_GROUP,
   MAIN_GROUP,
   defaultCategoryTarget,
   matchGroupNodes,
@@ -28,7 +27,6 @@ import {
   Icon,
   MultiTarget,
   NodePicker,
-  TargetOptions,
   type IconName,
   type TargetSection,
 } from "./ui";
@@ -56,13 +54,6 @@ const REGIONS = [
   { name: "新加坡节点", pattern: "新加坡|🇸🇬|(?:^|[-. ])sg" },
   { name: "美国节点", pattern: "美国|🇺🇸|🇺🇲|(?:^|[-. ])(?:us|sv)" },
 ];
-const RULE_TYPES = [
-  ["DOMAIN-SUFFIX", "域名及子域名"],
-  ["DOMAIN", "精确域名"],
-  ["DOMAIN-KEYWORD", "域名关键词"],
-  ["IP-CIDR", "IP / 网段"],
-  ["RAW", "完整规则"],
-] as const;
 const formatNumber = (value: number) => value.toLocaleString("en-US");
 const fingerprint = (config: AppConfig) => JSON.stringify(config.subscriptions);
 function withIds(config: AppConfig): AppConfig {
@@ -122,6 +113,7 @@ function replaceTargets(
         ? { ...rule, group: rename(rule.group) }
         : {
             ...rule,
+            group: rename(rule.group),
             value: rule.value
               .split("\n")
               .map((line) => {
@@ -167,7 +159,6 @@ export default function Workspace({
   const [bulk, setBulk] = useState("");
   const [importing, setImporting] = useState(false);
   const [loadInput, setLoadInput] = useState("");
-  const [ruleQuery, setRuleQuery] = useState("");
   const [origin, setOrigin] = useState("");
   const [yamlText, setYamlText] = useState("");
   const [storageFailed, setStorageFailed] = useState(false);
@@ -523,46 +514,6 @@ export default function Workspace({
         ],
       };
     });
-  const addGpt = () => {
-    setConfig((previous) => {
-      const existing = previous.groups.find((group) =>
-        /ChatGPT|GPT 专线/i.test(group.name),
-      );
-      const name = existing?.name ?? GPT_GROUP;
-      return {
-        ...previous,
-        groups: existing
-          ? previous.groups
-          : [
-              ...previous.groups,
-              {
-                id: crypto.randomUUID(),
-                name,
-                type: "manual",
-                nodes: [],
-                strategy: "select",
-              },
-            ],
-        customRules: [
-          {
-            type: "DOMAIN-SUFFIX",
-            value: CHATGPT_DOMAINS.join("\n"),
-            group: name,
-          },
-          ...previous.customRules.filter((rule) => {
-            const domains = rule.value.trim().split(/[\s,，]+/);
-            return (
-              rule.type !== "DOMAIN-SUFFIX" ||
-              domains.length !== CHATGPT_DOMAINS.length ||
-              !CHATGPT_DOMAINS.every((domain) => domains.includes(domain))
-            );
-          }),
-        ],
-      };
-    });
-    setView("nodes");
-    setMessage({ text: "ChatGPT 域名已关联专用组，请选择订阅来源和节点。" });
-  };
   const mapping = (category: string) =>
     config.ruleMapping.find((entry) => entry.category === category);
   const mapped = (category: string) => {
@@ -590,13 +541,6 @@ export default function Workspace({
         ...previous.ruleMapping.filter((entry) => entry.category !== category),
         { category, group: targets[0] ?? "", targets },
       ],
-    }));
-  const patchRule = (index: number, patch: Partial<CustomRule>) =>
-    setConfig((previous) => ({
-      ...previous,
-      customRules: previous.customRules.map((rule, i) =>
-        i === index ? { ...rule, ...patch } : rule,
-      ),
     }));
   const importBackup = async (file?: File) => {
     if (!file) return;
@@ -662,10 +606,10 @@ export default function Workspace({
         <div className="sidebar-note">
           <div>
             <span className="status-dot" />
-            iKuuu 规则引擎
+            默认规则模板
           </div>
           <p>
-            {formatNumber(baseCount)} 条内置规则
+            参考 iKuuu · {formatNumber(baseCount)} 条
             <br />
             你的线路，由你决定。
           </p>
@@ -770,7 +714,7 @@ export default function Workspace({
                   : view === "nodes"
                     ? "选择喜欢的节点，为不同用途建立专属线路。"
                     : view === "rules"
-                      ? "沿用熟悉的 iKuuu 规则，把特殊需求交给自定义分流。"
+                      ? "先写下需要特殊处理的地址，其余流量交给默认分流模板。"
                       : "一个固定链接，让所有修改有处可达。"}
               </p>
             </div>
@@ -816,12 +760,15 @@ export default function Workspace({
                       在这里<span>汇合。</span>
                     </h2>
                     <p>
-                      日常上网、AI 对话、工作专线。
+                      默认分流，按需定制。
                       <br />
                       聚合你的订阅，保留你的选择。
                     </p>
-                    <button className="text-button" onClick={addGpt}>
-                      配置 ChatGPT 专线 <Icon name="arrow" />
+                    <button
+                      className="text-button"
+                      onClick={() => setView("rules")}
+                    >
+                      添加我的规则 <Icon name="arrow" />
                     </button>
                   </div>
                   <div className="route-visual" aria-hidden="true">
@@ -832,7 +779,7 @@ export default function Workspace({
                     </div>
                     <div className="route-source source-two">
                       <Icon name="spark" />
-                      <span>AI 专线</span>
+                      <span>备用订阅</span>
                       <i />
                     </div>
                     <div className="route-source source-three">
@@ -908,7 +855,7 @@ export default function Workspace({
                           {config.subscriptions.length}
                         </span>
                       </h2>
-                      <p>订阅提供节点，分流使用 iKuuu 基础规则。</p>
+                      <p>所有订阅一起提供节点，地址怎么走由你的规则决定。</p>
                     </div>
                     <div className="button-row">
                       <button
@@ -1106,19 +1053,60 @@ export default function Workspace({
             )}
             {view === "nodes" && (
               <>
+                <section className="panel default-egress">
+                  <div>
+                    <span className="eyebrow">EVERYDAY CONNECTION</span>
+                    <h2>日常上网，跟随这个出口</h2>
+                    <p>
+                      选择订阅组，会跟随组里当前的节点；也可以直接选择任意订阅的单个节点。专用地址会优先使用自己的规则。
+                    </p>
+                  </div>
+                  <div>
+                    <MultiTarget
+                      selected={mapped(MAIN_GROUP)}
+                      sections={sections.map((section) => ({
+                        ...section,
+                        values: section.values.filter(
+                          (value) => value !== MAIN_GROUP,
+                        ),
+                      }))}
+                      onChange={(targets) => setMapping(MAIN_GROUP, targets)}
+                    />
+                    <div className="egress-actions">
+                      <button
+                        className="text-button"
+                        onClick={() =>
+                          setConfig((previous) => ({
+                            ...previous,
+                            ruleMapping: previous.ruleMapping.filter(
+                              (entry) => entry.category !== MAIN_GROUP,
+                            ),
+                          }))
+                        }
+                      >
+                        恢复订阅组选择
+                      </button>
+                      <button
+                        className="text-button"
+                        onClick={() => setMapping(MAIN_GROUP, [AUTO_GROUP])}
+                      >
+                        使用自动测速
+                      </button>
+                    </div>
+                  </div>
+                </section>
                 <div className="feature-note">
                   <span className="feature-icon">
                     <Icon name="spark" />
                   </span>
                   <div>
-                    <h3>给 ChatGPT 一条专属线路</h3>
+                    <h3>按需建立自己的节点组</h3>
                     <p>
-                      限定专用订阅、勾选节点，再发布更新。其他网站仍按 iKuuu
-                      规则分流。
+                      从任意订阅挑选节点，组成自己的线路，再为需要的地址指定出口。
                     </p>
                   </div>
-                  <button className="button" onClick={addGpt}>
-                    配置 ChatGPT 专线 <Icon name="arrow" />
+                  <button className="button" onClick={() => setView("rules")}>
+                    添加我的规则 <Icon name="arrow" />
                   </button>
                 </div>
                 {!currentPreview && (
@@ -1353,227 +1341,35 @@ export default function Workspace({
               </>
             )}
             {view === "rules" && (
-              <>
-                <section className="panel">
-                  <div className="panel-heading">
-                    <div>
-                      <h2>
-                        iKuuu 基础规则{" "}
-                        <span className="state-badge success">内置</span>
-                      </h2>
-                      <p>
-                        {formatNumber(
-                          currentPreview?.baseRuleCount ?? baseCount,
-                        )}{" "}
-                        条规则保持原顺序，可单独调整每个类别的目标。
-                      </p>
-                    </div>
-                    <button
-                      className="button small-button"
-                      onClick={() => {
-                        setConfig((previous) => ({
-                          ...previous,
-                          ruleMapping: [],
-                        }));
-                        setMessage({
-                          text: "已恢复 iKuuu 默认分流，自定义规则保留。",
-                        });
-                      }}
-                    >
-                      恢复默认分流
-                    </button>
-                  </div>
-                  <div className="rule-search search-input">
-                    <Icon name="search" />
-                    <input
-                      aria-label="搜索规则类别"
-                      placeholder="搜索类别，例如 Steam、国内…"
-                      value={ruleQuery}
-                      onChange={(event) => setRuleQuery(event.target.value)}
-                    />
-                  </div>
-                  <div className="rule-table">
-                    <div className="rule-table-head">
-                      <span>规则类别</span>
-                      <span>匹配条数</span>
-                      <span>路由目标 · 可多选</span>
-                    </div>
-                    {categories
-                      .filter((category) =>
-                        category
-                          .toLowerCase()
-                          .includes(ruleQuery.toLowerCase()),
-                      )
-                      .map((category) => (
-                        <div className="rule-row" key={category}>
-                          <div>
-                            <strong>{category}</strong>
-                            <small>
-                              {mapping(category)
-                                ? "已自定义"
-                                : category === MAIN_GROUP
-                                  ? "默认包含全部节点"
-                                  : "iKuuu 默认策略"}
-                            </small>
-                          </div>
-                          <span className="mono muted">
-                            {formatNumber(counts[category])}
-                          </span>
-                          <MultiTarget
-                            selected={mapped(category)}
-                            sections={sections.map((section) => ({
-                              ...section,
-                              values: section.values.filter(
-                                (value) => value !== category,
-                              ),
-                            }))}
-                            onChange={(targets) =>
-                              setMapping(category, targets)
-                            }
-                          />
-                        </div>
-                      ))}
-                  </div>
-                </section>
-                <section className="panel custom-panel">
-                  <div className="panel-heading">
-                    <div>
-                      <h2>
-                        自定义分流{" "}
-                        <span className="state-badge warm">优先匹配</span>
-                      </h2>
-                      <p>规则按从上到下的顺序执行，再进入 iKuuu 基础规则。</p>
-                    </div>
-                    <button
-                      className="button small-button"
-                      onClick={() =>
-                        setConfig((previous) => ({
-                          ...previous,
-                          customRules: [
-                            ...previous.customRules,
-                            {
-                              type: "DOMAIN-SUFFIX",
-                              value: "",
-                              group: MAIN_GROUP,
-                            },
-                          ],
-                        }))
-                      }
-                    >
-                      <Icon name="plus" />
-                      添加规则
-                    </button>
-                  </div>
-                  {config.customRules.map((rule, index) => (
-                    <article className="custom-rule" key={index}>
-                      <div className="rule-index">
-                        {String(index + 1).padStart(2, "0")}
-                        <button
-                          aria-label={`上移规则 ${index + 1}`}
-                          disabled={index === 0}
-                          className="text-button"
-                          onClick={() =>
-                            setConfig((previous) => {
-                              const customRules = [...previous.customRules];
-                              [customRules[index - 1], customRules[index]] = [
-                                customRules[index],
-                                customRules[index - 1],
-                              ];
-                              return { ...previous, customRules };
-                            })
-                          }
-                        >
-                          ↑
-                        </button>
-                      </div>
-                      <div className="custom-rule-fields">
-                        <div className="form-grid">
-                          <Field label="匹配方式">
-                            <select
-                              value={rule.type}
-                              onChange={(event) =>
-                                patchRule(index, {
-                                  type: event.target
-                                    .value as CustomRule["type"],
-                                })
-                              }
-                            >
-                              {RULE_TYPES.map(([value, label]) => (
-                                <option key={value} value={value}>
-                                  {label} · {value}
-                                </option>
-                              ))}
-                            </select>
-                          </Field>
-                          {rule.type !== "RAW" && (
-                            <Field label="交给哪条线路">
-                              <select
-                                value={rule.group}
-                                onChange={(event) =>
-                                  patchRule(index, {
-                                    group: event.target.value,
-                                  })
-                                }
-                              >
-                                <TargetOptions
-                                  sections={sections}
-                                  current={rule.group}
-                                />
-                              </select>
-                            </Field>
-                          )}
-                        </div>
-                        <Field
-                          label={
-                            rule.type === "RAW"
-                              ? "完整 Clash 规则 · 每行一条"
-                              : "匹配内容 · 每行一项"
-                          }
-                        >
-                          <textarea
-                            rows={rule.value.split("\n").length > 4 ? 4 : 2}
-                            value={rule.value}
-                            spellCheck={false}
-                            placeholder={
-                              rule.type === "IP-CIDR"
-                                ? "1.2.3.4 或 1.2.3.0/24"
-                                : rule.type === "RAW"
-                                  ? "DOMAIN-SUFFIX,example.com,DIRECT"
-                                  : "example.com\nhttps://another.example.com"
-                            }
-                            onChange={(event) =>
-                              patchRule(index, { value: event.target.value })
-                            }
-                          />
-                        </Field>
-                      </div>
-                      <button
-                        aria-label={`删除规则 ${index + 1}`}
-                        className="icon-button remove-button"
-                        onClick={() =>
-                          setConfig((previous) => ({
-                            ...previous,
-                            customRules: previous.customRules.filter(
-                              (_, i) => i !== index,
-                            ),
-                          }))
-                        }
-                      >
-                        <Icon name="close" />
-                      </button>
-                    </article>
-                  ))}
-                  {!config.customRules.length && (
-                    <Empty
-                      title="让特殊需求走专属线路"
-                      description="添加域名或 IP 规则，指定单个节点、节点组、直连或拦截。"
-                    />
-                  )}
-                </section>
-              </>
+              <RulesWorkspace
+                config={config}
+                setConfig={setConfig}
+                sections={sections}
+                counts={counts}
+                mapped={mapped}
+                onMapping={setMapping}
+                onNotice={(text, error = false) => setMessage({ text, error })}
+                onManageGroups={() => setView("nodes")}
+              />
             )}
             {view === "publish" && (
               <>
+                {dirty && (
+                  <section className="panel publish-changes">
+                    <div>
+                      <span className="eyebrow">READY TO SYNC</span>
+                      <h3>本次待发布</h3>
+                      <p>发布后，在 Clash 刷新原订阅链接即可应用。</p>
+                    </div>
+                    <ul>
+                      {publishChanges(saved?.config, config).map(
+                        (change, index) => (
+                          <li key={index}>{change}</li>
+                        ),
+                      )}
+                    </ul>
+                  </section>
+                )}
                 <div className="publish-grid">
                   <section className="panel publish-card">
                     <span className="publish-symbol">

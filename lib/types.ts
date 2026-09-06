@@ -28,6 +28,10 @@ export interface CustomRule {
   value: string;
   /** 目标：单个节点、用户节点组、DIRECT 或 REJECT */
   group: string;
+  /** 方便识别用途，例如“公司数据库”；不写入 Clash 匹配条件。 */
+  note?: string;
+  /** 暂停规则时保留配置，生成订阅时跳过。 */
+  enabled?: boolean;
 }
 
 /** 订阅来源 */

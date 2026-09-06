@@ -24,7 +24,7 @@ import { LEGACY_POLICY_TARGETS } from "./policy-targets";
 
 const FALLBACK_BASE_RULES: string[] = baseRulesJson;
 let baseRulesCache: { expiresAt: number; rules: string[] } | null = null;
-async function getBaseRules(): Promise<string[]> {
+export async function getBaseRules(): Promise<string[]> {
   if (baseRulesCache && baseRulesCache.expiresAt > Date.now())
     return baseRulesCache.rules;
   let rules = FALLBACK_BASE_RULES;
@@ -228,6 +228,7 @@ export function fixRuleGroup(
 }
 
 export function buildCustomRules(rule: CustomRule): string[] {
+  if (rule.enabled === false) return [];
   if (!rule.value.trim()) return [];
   if (rule.type === "RAW")
     return rule.value

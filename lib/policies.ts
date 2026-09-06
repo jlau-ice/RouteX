@@ -2,20 +2,6 @@ import type { NodeGroup, SubscriptionSource } from "./types";
 
 export const MAIN_GROUP = "🔰 选择节点";
 export const AUTO_GROUP = "♻️ 自动测速";
-export const GPT_GROUP = "ChatGPT 专线";
-export const CHATGPT_DOMAINS = [
-  "chatgpt.com",
-  "openai.com",
-  "oaistatic.com",
-  "oaiusercontent.com",
-  "openaimerge.com",
-  "oaistatsig.com",
-  "featuregates.org",
-  "featureassets.org",
-  "prodregistryv2.org",
-  "chatgpt.livekit.cloud",
-];
-
 export function sourceId(source: SubscriptionSource, index: number): string {
   return source.id ?? `source-${index + 1}`;
 }

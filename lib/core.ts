@@ -274,6 +274,23 @@ export function buildGroups(
   });
 }
 
+// GEOIP,CN 前补 GEOSITE,CN，并加 no-resolve，避免为匹配规则而在本地解析域名。
+function withoutDnsLeak(rules: string[]): string[] {
+  const out: string[] = [];
+  for (const rule of rules) {
+    const parts = rule.split(",");
+    if (parts[0] === "GEOIP" && parts[1]?.toUpperCase() === "CN") {
+      const target = parts[2];
+      const geosite = `GEOSITE,CN,${target}`;
+      if (!rules.includes(geosite) && !out.includes(geosite)) out.push(geosite);
+      out.push(parts.includes("no-resolve") ? rule : `${rule},no-resolve`);
+      continue;
+    }
+    out.push(rule);
+  }
+  return out;
+}
+
 async function assemble(config: AppConfig) {
   assertAppConfig(config);
   const [baseRules, fetched] = await Promise.all([
@@ -420,7 +437,7 @@ async function assemble(config: AppConfig) {
     parts[idx] = resolveTarget(category);
     return parts.join(",");
   });
-  const rules = [...new Set(custom), ...baseRules];
+  const rules = withoutDnsLeak([...new Set(custom), ...baseRules]);
   if (!rules.some((rule) => rule.startsWith("MATCH,")))
     rules.push(`MATCH,${MAIN_GROUP}`);
   const preview: PreviewResult = {
@@ -456,13 +473,27 @@ export async function generateConfig(config: AppConfig): Promise<string> {
       ipv6: false,
       // 更新配置时采用网页设定的默认节点；运行期间仍可在 Clash 手动切换。
       profile: { "store-selected": false },
+      // 国外域名经代理用 DoH 解析，国内/私有域名走国内 DoH，避免 DNS 泄露。
       dns: {
         enable: true,
         ipv6: false,
         "enhanced-mode": "fake-ip",
         "fake-ip-range": "198.18.0.1/16",
-        nameserver: ["223.5.5.5", "119.29.29.29"],
-        fallback: ["8.8.8.8", "1.1.1.1"],
+        "default-nameserver": ["223.5.5.5", "119.29.29.29"],
+        "proxy-server-nameserver": [
+          "https://223.5.5.5/dns-query",
+          "https://1.12.12.12/dns-query",
+        ],
+        nameserver: [
+          `https://1.1.1.1/dns-query#${MAIN_GROUP}`,
+          `https://8.8.8.8/dns-query#${MAIN_GROUP}`,
+        ],
+        "nameserver-policy": {
+          "geosite:cn,private": [
+            "https://223.5.5.5/dns-query",
+            "https://1.12.12.12/dns-query",
+          ],
+        },
       },
       proxies: nodes,
       "proxy-groups": groups,

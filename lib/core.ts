@@ -135,6 +135,7 @@ async function fetchSources(config: AppConfig) {
         name,
         sourceId: info.sourceId,
         nodes: [] as ClashProxy[],
+        chains: [] as ClashGroup[],
         info,
       };
       if (source.enabled === false) return empty;
@@ -157,6 +158,46 @@ async function fetchSources(config: AppConfig) {
         const renames = new Map(
           rawNodes.map((node) => [node.name, `${prefix}${node.name}`]),
         );
+        // 链式代理：dialer-proxy 指向订阅自带的策略组时，把该组一并导入为前置组。
+        const sourceGroupDefs = new Map(
+          (Array.isArray(parsed["proxy-groups"]) ? parsed["proxy-groups"] : [])
+            .filter(isRecord)
+            .filter((group) => typeof group.name === "string")
+            .map((group) => [group.name as string, group]),
+        );
+        const chained = new Set(
+          rawNodes
+            .filter((node) => typeof node["dialer-proxy"] === "string")
+            .map((node) => node.name),
+        );
+        const usedNames = new Set(renames.values());
+        const chains = new Map<string, ClashGroup>();
+        const chainGroup = (reference: string): string => {
+          const existing = chains.get(reference);
+          if (existing) return existing.name;
+          const def = sourceGroupDefs.get(reference);
+          if (!def || !Array.isArray(def.proxies))
+            throw new Error("节点的 dialer-proxy 引用了未导入的策略组");
+          // 只保留不再套前置的节点，避免链路循环。
+          const proxies = def.proxies
+            .filter(
+              (member): member is string =>
+                typeof member === "string" && renames.has(member),
+            )
+            .filter((member) => !chained.has(member))
+            .map((member) => renames.get(member)!);
+          if (!proxies.length)
+            throw new Error("节点的 dialer-proxy 引用的策略组中没有可用节点");
+          let groupName = `${prefix}${reference.trim().replace(/[,\r\n]/g, " ")}`;
+          while (usedNames.has(groupName)) groupName += "_";
+          usedNames.add(groupName);
+          chains.set(reference, {
+            name: groupName,
+            type: "select",
+            proxies: [...new Set(proxies)],
+          });
+          return groupName;
+        };
         const nodes = rawNodes.map((node) => {
           const result: ClashProxy = { ...node, name: renames.get(node.name)! };
           if (typeof result["dialer-proxy"] === "string") {
@@ -164,7 +205,7 @@ async function fetchSources(config: AppConfig) {
             if (renames.has(reference))
               result["dialer-proxy"] = renames.get(reference);
             else if (!BUILTINS.has(reference))
-              throw new Error("节点的 dialer-proxy 引用了未导入的策略组");
+              result["dialer-proxy"] = chainGroup(reference);
           }
           return result;
         });
@@ -172,6 +213,7 @@ async function fetchSources(config: AppConfig) {
           name,
           sourceId: info.sourceId,
           nodes,
+          chains: [...chains.values()],
           info: {
             ...info,
             status: "ok" as const,
@@ -299,6 +341,7 @@ async function assemble(config: AppConfig) {
   ]);
   const nodes = fetched.flatMap((source) => source.nodes);
   const allNodes = nodes.map((node) => node.name);
+  const chainGroups = fetched.flatMap((source) => source.chains);
   const sourceGroups = fetched.map((source) => ({
     name: source.name,
     sourceId: source.sourceId,
@@ -321,6 +364,7 @@ async function assemble(config: AppConfig) {
         ...categories,
         ...sourceNames,
         ...allNodes,
+        ...chainGroups.map((chain) => chain.name),
         AUTO_GROUP,
         ...BUILTINS,
       ].includes(group.name)
@@ -342,6 +386,7 @@ async function assemble(config: AppConfig) {
       url: "https://www.gstatic.com/generate_204",
       interval: 300,
     },
+    ...chainGroups,
   ];
   const valid = new Set([
     ...allNodes,
